@@ -28,7 +28,7 @@ struct sphere {
     }
 };
 
-sphere *s;
+__constant__ sphere s[SPHERES]; // **Note**: Added qualifier for constant memoru
 #define N 16
 
 __global__ void render(float* dev, sphere* s) {
@@ -89,8 +89,11 @@ int main() {
         temp_s[i].radius = (rand() % 30) / 10.0f + 0.5f;   // 0.5 .. 3.5
     }
 
-    // transfer the data from host to device
-    cudaMemcpy(s, temp_s, SPHERES*sizeof(sphere), cudaMemcpyHostToDevice);
+
+    // **Note**: Use cudaMemcpyToSymbol for constant memory.
+    // It requires no declaration og HostToDevice flag because it
+    // directly copies values to constant memory
+    cudaMemcpyToSymbol(s, temp_s, SPHERES*sizeof(sphere));
 
     free(temp_s); // free the temporary host memory
 
