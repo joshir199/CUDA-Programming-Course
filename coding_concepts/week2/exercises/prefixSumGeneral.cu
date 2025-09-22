@@ -5,6 +5,22 @@ using namespace std;
 #define N 1101
 #define threadsPerBlock 128
 
+/*
+Key Concepts
+Hierarchical Scan (Blelloch method)
+1. Divide & Conquer
+  Break large scan into per-block scans. (Do offset Doubling Pattern)
+  Aggregate block totals. (Just call the same kernel)
+  Distribute back.
+
+2. Two-Level Hierarchy
+  Level 1: Threads within a block (fast, shared memory).
+  Level 2: Blocks across the grid (slower, needs second pass).
+
+3. Work Complexity
+  Still O(N), but parallel steps = O(log N).
+*/
+
 //Only when the N is less than totals threads per block
 __global__ void kernelPrefixSumPerBlock(int* a, int* c, int* blocks) {
     int tid = threadIdx.x + blockIdx.x * blockDim.x; // thread Ids assuming multiple blocks
