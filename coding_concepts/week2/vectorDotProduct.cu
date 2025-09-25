@@ -17,12 +17,12 @@ __global__ void dotProduct(float* a, float* b, float* c) {
     // Each block will have private copy of shared memory.
     // Therefor, only all threads per block will be declared here
     __shared__ float cache[threadsPerBlock];
-    float temp = 0;
+    float temp = 0;  // to store the per thread information, can't be access by another thread
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     int cacheIdx = threadIdx.x; // Since, each block has its own shared memory
 
     while(tid < N) {
-        temp += a[tid] * b[tid];
+        temp += a[tid] * b[tid];  // each thread's result will remain with each thread
         tid += blockDim.x * gridDim.x;
     }
 
