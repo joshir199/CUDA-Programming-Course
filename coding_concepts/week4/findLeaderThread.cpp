@@ -77,5 +77,11 @@ int main() {
     CHECK_CUDA(cudaEventDestroy(start));
     CHECK_CUDA(cudaEventDestroy(stop));
 
+    /*
+    Pageable Memory Transfer Elapsed time(in ms) for HostToDevice: 26.5556, and for DeviceToHost: 31.2546
+    Pinned Memory Transfer Elapsed time(in ms) for HostToDevice: 21.082, and for DeviceToHost: 21.4768
+    SpeedUp for pinned memory: 1.35836
+    */
+
     return 0;
 }
