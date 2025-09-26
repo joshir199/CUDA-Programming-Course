@@ -46,15 +46,20 @@ int main() {
 
     // define the host and device variables for memory allocation
     int *h_a, *h_b, *h_c;
-    int *d_a, *d_b, *d_c;
+    int *d_a0, *d_b0, *d_c0; // memory buffer for stream0
+    int *d_a1, *d_b1, *d_c1; // memory buffer for stream1
 
-    cudaStream_t stream;  // define the stream
-    CUDA_CHECK(cudaStreamCreate(&stream)); // create the stream variable
+    cudaStream_t stream0, stream1;  // define the streams
+    CUDA_CHECK(cudaStreamCreate(&stream0)); // create the stream0 variable
+    CUDA_CHECK(cudaStreamCreate(&stream1)); // create the stream1 variable
 
     // allocate the memory to the device variable for only Chunk Size (N)
-    CUDA_CHECK(cudaMalloc(&d_a, N*sizeof(int)));
-    CUDA_CHECK(cudaMalloc(&d_b, N*sizeof(int)));
-    CUDA_CHECK(cudaMalloc(&d_c, N*sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&d_a0, N*sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&d_b0, N*sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&d_c0, N*sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&d_a1, N*sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&d_b1, N*sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&d_c1, N*sizeof(int)));
 
     // allocate the pinned memory to the Host variable to support Asynchronous copy
     CUDA_CHECK(cudaHostAlloc(&h_a, Size*sizeof(int), cudaHostAllocDefault));
@@ -70,28 +75,45 @@ int main() {
     // Now, create multiple operations to be passed into the stream
     // for the execution to take place in asynchronous manner
     // Here, we divide the overall array into multiple chunks
-    for(int i=0; i<Size; i+=N) {
+    // Now, In each iteration of loop, we can process 2*N values by 2 streams combined
+    for(int i=0; i<Size; i+= 2*N) {
+        // ************************   stream0 calls   *************************
         // copy 1 for variable h_a starting from "i-th" index
-        CUDA_CHECK(cudaMemcpyAsync(d_a, h_a+i, N*sizeof(int), cudaMemcpyHostToDevice, stream));
+        CUDA_CHECK(cudaMemcpyAsync(d_a0, h_a+i, N*sizeof(int), cudaMemcpyHostToDevice, stream0));
 
         // copy 1 for variable h_b starting from "i-th" index
-        CUDA_CHECK(cudaMemcpyAsync(d_b, h_b+i, N*sizeof(int), cudaMemcpyHostToDevice, stream));
+        CUDA_CHECK(cudaMemcpyAsync(d_b0, h_b+i, N*sizeof(int), cudaMemcpyHostToDevice, stream0));
 
-        // call the kernel to do the required task and make output
-        kernelChunkSum<<<(N+255)/256, 256, 0, stream>>>(d_a, d_b, d_c);
+        // stream0 call the kernel to do the required task and make output
+        kernelChunkSum<<<(N+255)/256, 256, 0, stream0>>>(d_a0, d_b0, d_c0);
 
         // copy 1 for variable h_c (output) starting from "i-th" index
-        CUDA_CHECK(cudaMemcpyAsync(h_c+i, d_c, N*sizeof(int), cudaMemcpyDeviceToHost, stream));
+        CUDA_CHECK(cudaMemcpyAsync(h_c+i, d_c0, N*sizeof(int), cudaMemcpyDeviceToHost, stream0));
+
+        // ****************  stream1 calls   *******************************
+        // copy 1 for variable h_a starting from "(i + N)-th" index
+        CUDA_CHECK(cudaMemcpyAsync(d_a1, h_a+i+N, N*sizeof(int), cudaMemcpyHostToDevice, stream1));
+
+        // copy 1 for variable h_b starting from "(i + N)-th" index
+        CUDA_CHECK(cudaMemcpyAsync(d_b1, h_b+i+N, N*sizeof(int), cudaMemcpyHostToDevice, stream1));
+
+        // stream1 call the kernel to do the required task and make output
+        kernelChunkSum<<<(N+255)/256, 256, 0, stream1>>>(d_a1, d_b1, d_c1);
+
+        // copy 1 for variable h_c (output) starting from "(i + N)-th" index
+        CUDA_CHECK(cudaMemcpyAsync(h_c+i+N, d_c1, N*sizeof(int), cudaMemcpyDeviceToHost, stream1));
     }
 
-    CUDA_CHECK(cudaStreamSynchronize(stream));
+    // call to synchronize the GPU computation before doing any CPU Host operation
+    CUDA_CHECK(cudaStreamSynchronize(stream0));
+    CUDA_CHECK(cudaStreamSynchronize(stream1));
 
     CUDA_CHECK(cudaEventRecord(stop, 0));
     CUDA_CHECK(cudaEventSynchronize(stop));
 
     float elapsed_time;
     CUDA_CHECK(cudaEventElapsedTime(&elapsed_time, start, stop));
-    cout<<"Elapsed time(in ms) : "<<elapsed_time<<endl; // Elapsed time(in ms) : 4.06733
+    cout<<"Elapsed time(in ms) : "<<elapsed_time<<endl; // Elapsed time(in ms) : 3.92611
 
     for(int i = 0; i<100;i++){
         cout<<" Vector Sum result: "<< h_c[i] <<endl;
@@ -100,10 +122,14 @@ int main() {
     CUDA_CHECK(cudaFreeHost(h_a));
     CUDA_CHECK(cudaFreeHost(h_b));
     CUDA_CHECK(cudaFreeHost(h_c));
-    CUDA_CHECK(cudaFree(d_a));
-    CUDA_CHECK(cudaFree(d_b));
-    CUDA_CHECK(cudaFree(d_c));
-    CUDA_CHECK(cudaStreamDestroy(stream));
+    CUDA_CHECK(cudaFree(d_a0));
+    CUDA_CHECK(cudaFree(d_b0));
+    CUDA_CHECK(cudaFree(d_c0));
+    CUDA_CHECK(cudaFree(d_a1));
+    CUDA_CHECK(cudaFree(d_b1));
+    CUDA_CHECK(cudaFree(d_c1));
+    CUDA_CHECK(cudaStreamDestroy(stream0));
+    CUDA_CHECK(cudaStreamDestroy(stream1));
     CUDA_CHECK(cudaEventDestroy(start));
     CUDA_CHECK(cudaEventDestroy(stop));
 
