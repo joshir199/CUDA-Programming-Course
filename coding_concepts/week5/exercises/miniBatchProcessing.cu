@@ -91,15 +91,16 @@ int main() {
 
     CHECK_CUDA(cudaEventRecord(start));
     // Run the loop to process each batch
-    //    stream0     |      stream1       |      stream2
-    //    h2d_cpy     |                    |
-    //    h2d_cpy     |      kernel        |
-    //    h2d_cpy     |      kernel        |     d2h_cpy
-    //    h2d_cpy     |      kernel        |     d2h_cpy
-            :                   :                  :
-            :                   :                  :
-    //                |      kernel        |     d2h_cpy
-    //                |                    |     d2h_cpy
+    //     stream0        |       stream1          |      stream2
+    //    h2d_cpy(b0)     |                        |
+    //    h2d_cpy(b1)     |      kernel(b0)        |
+    //    h2d_cpy(b2)     |      kernel(b1)        |     d2h_cpy(b0)
+    //    h2d_cpy(b3)     |      kernel(b0)        |     d2h_cpy(b1)
+              :                       :                      :
+              :                       :                      :
+    //   h2d_cpy(bn)      |      kernel(bn-1)      |     d2h_cpy(bn-2)
+    //                    |      kernel(bn)        |     d2h_cpy(bn-1)
+    //                    |                        |     d2h_cpy(bn)
     for(int i = 0; i<numBatches+2; i++) {
         // Stream0: Only do the data copy from host to device
         if(i<=0 && i<numBatches) { // starts at 0-th batch and ends at numBatches-1 -th batch.
