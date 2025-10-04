@@ -23,7 +23,7 @@ __global__ void reverseArrayInPlace(float* a) {
 
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     float temp;
-    
+
     if(tid<N) {
         temp = a[tid]; // store values per thread
     }
@@ -47,13 +47,13 @@ int main() {
     for(int i=0; i<N ;i++) {
         h_a[i] = (rand() % 90) * 0.018f;
     }
-    
+
 
     CHECK_CUDA(cudaMemcpy(d_a, h_a, N*sizeof(float), cudaMemcpyHostToDevice));
-    
+
     int blocksPerGrid = (N + threadsPerBlock - 1)/threadsPerBlock;
-   
-    convolution<<<blocksPerGrid, threadsPerBlock>>>(d_a);
+
+    reverseArrayInPlace<<<blocksPerGrid, threadsPerBlock>>>(d_a);
 
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
