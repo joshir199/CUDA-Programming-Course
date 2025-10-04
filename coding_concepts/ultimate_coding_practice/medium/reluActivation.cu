@@ -28,6 +28,18 @@ __global__ void reluActivation(float* a, float* c) {
     }
 }
 
+// Leaky ReLU Activation function f = alpha*x if x<=0 otherwise x
+// Here, alpha is in [0, 1], which is similar to original relu (when alpha = 0).
+__global__ void reluActivation(float* a, float* c) {
+
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    int alpha = 0.01;
+
+    if(tid<N) {
+        c[tid] = fmaxf(a[tid], alpha * a[tid]); // store values per thread
+    }
+}
+
 
 int main() {
 
