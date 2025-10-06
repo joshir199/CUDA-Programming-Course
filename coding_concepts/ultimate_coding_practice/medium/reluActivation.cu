@@ -18,22 +18,13 @@ using namespace std;
 } while(0)
 
 
-// ReLU Activation function f = max{0, x}.
-__global__ void reluActivation(float* a, float* c) {
 
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-
-    if(tid<N) {
-        c[tid] = fmaxf(a[tid], 0); // store values per thread
-    }
-}
-
-// Leaky ReLU Activation function f = alpha*x if x<=0 otherwise x
+// General Leaky ReLU Activation function f = alpha*x if x<=0 otherwise x
 // Here, alpha is in [0, 1], which is similar to original relu (when alpha = 0).
 __global__ void reluActivation(float* a, float* c) {
 
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    int alpha = 0.01;
+    float alpha = 0.01f;  // set alpha in range of [0, 1]
 
     if(tid<N) {
         c[tid] = fmaxf(a[tid], alpha * a[tid]); // store values per thread
@@ -46,7 +37,7 @@ int main() {
     cudaEvent_t start, stop;
     CHECK_CUDA(cudaEventCreate(&start));
     CHECK_CUDA(cudaEventCreate(&stop));
-    CHECK_CUDA(cudaEventRecord(start, 0));
+
 
     float h_a[N], h_c[N];
     float *d_a, *d_c;
@@ -59,6 +50,7 @@ int main() {
         h_a[i] = (rand() % 90) * 0.018f - (rand() % 90) * 0.05f;
     }
 
+    CHECK_CUDA(cudaEventRecord(start, 0));
 
     CHECK_CUDA(cudaMemcpy(d_a, h_a, N*sizeof(float), cudaMemcpyHostToDevice));
 
@@ -77,7 +69,7 @@ int main() {
     float elapsed_time;
     CHECK_CUDA(cudaEventElapsedTime(&elapsed_time, start, stop));
 
-    cout<<"Elapsed time(in ms) : "<< elapsed_time<<endl;
+    cout<<"Elapsed time(in ms) : "<< elapsed_time<<endl;  // 2.42
 
     for(int i = 0; i< 50 && i<N; i++) {
         cout<<"Reversed Array result at i:"<<i<<", is: "<<h_c[i]<<", original array: "<<h_a[i]<<endl;

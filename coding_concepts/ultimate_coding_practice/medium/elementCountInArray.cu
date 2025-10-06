@@ -49,13 +49,12 @@ __global__ void elementCounter(int* a, int* c, int k) {
 }
 
 
-
 int main() {
 
     cudaEvent_t start, stop;
     CHECK_CUDA(cudaEventCreate(&start));
     CHECK_CUDA(cudaEventCreate(&stop));
-    CHECK_CUDA(cudaEventRecord(start, 0));
+
 
     int h_a[N], h_c, k;
     int *d_a, *d_c;
@@ -69,6 +68,8 @@ int main() {
     }
     k = 8;
 
+    CHECK_CUDA(cudaEventRecord(start, 0));
+
     CHECK_CUDA(cudaMemcpy(d_a, h_a, N*sizeof(int), cudaMemcpyHostToDevice));
 
     int blocksPerGrid = (N + threadsPerBlock - 1)/threadsPerBlock;
@@ -78,7 +79,7 @@ int main() {
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
 
-    CHECK_CUDA(cudaMemcpy(h_c, d_c, sizeof(int), cudaMemcpyDeviceToHost));
+    CHECK_CUDA(cudaMemcpy(&h_c, d_c, sizeof(int), cudaMemcpyDeviceToHost));
 
     CHECK_CUDA(cudaEventRecord(stop, 0));
     CHECK_CUDA(cudaEventSynchronize(stop));
@@ -86,10 +87,10 @@ int main() {
     float elapsed_time;
     CHECK_CUDA(cudaEventElapsedTime(&elapsed_time, start, stop));
 
-    cout<<"Elapsed time(in ms) : "<< elapsed_time<<endl;
+    cout<<"Elapsed time(in ms) : "<< elapsed_time<<endl;  // 0.69
 
 
-    cout<<"Count of element k="<<k<<", is: "<<h_c<<endl;
+    cout<<"Count of element k="<<k<<", is: "<<h_c<<endl;  // Count of element k=8, is: 42868
 
 
     CHECK_CUDA(cudaFree(d_a));
