@@ -26,21 +26,25 @@ __constant__ float filter[F_len];
 // Here, convolution is  in 1D direction.
 // e.g: C[i] = Sum(x[i+j]*f[j] For j in [-F_len/2, F_len/2]).
 // thus, it will only have both left and right halo.
-__global__ void convolution(float* a, float* c) {
+__global__ void convolutionFull(float* a, float* c) {
 
     __shared__ float cache[SharedCacheSize];  // Ensure total memory < 64KB
     int cacheIdx = threadIdx.x;
     int halo = F_len/2;
     // globalId = threadId in block + block_start_Idx - left_halo
     int gIdx = threadIdx.x + blockIdx.x * B - halo;
+
     // When the cache size is very large, each thread can cooperate to load the elements
     // [Coalesced], where each threads reads multiple inputs into the shared memory
     int elementsPerThread = (SharedCacheSize + threadsPerBlock - 1)/threadsPerBlock;
 
     for(int load_i = 0; load_i<elementsPerThread; load_i++) {
         int localCacheIdx = cacheIdx + load_i * threadsPerBlock; // for cache (extra term for coalesce)
-        if(localCacheIdx<SharedCacheSize) {
+
+        if(localCacheIdx < SharedCacheSize) { // per block data loading
+
             int globalIdx = gIdx + load_i * threadsPerBlock; // for input array (extra term for coalesce)
+
             if(globalIdx >=0 && globalIdx<N) {
                 cache[localCacheIdx] = a[globalIdx];
             } else {
@@ -48,7 +52,7 @@ __global__ void convolution(float* a, float* c) {
             }
         }
     }
-    __syncthreads();
+    __syncthreads();  // ensure all shared memory operations are completed
 
     // calculate convolution for B inputs per block
     // It will produce only B outputs per block
@@ -74,7 +78,7 @@ int main() {
     cudaEvent_t start, stop;
     CHECK_CUDA(cudaEventCreate(&start));
     CHECK_CUDA(cudaEventCreate(&stop));
-    CHECK_CUDA(cudaEventRecord(start, 0));
+
 
     float h_a[N], h_c[N], h_kernel[F_len];
     float *d_a, *d_c;
@@ -84,7 +88,7 @@ int main() {
 
     // fill data in host device
     for(int i=0; i<N ;i++) {
-        h_a[i] = 1.0f; //(rand() % 90) * 0.018f;
+        h_a[i] = (rand() % 90) * 0.018f;
     }
 
     // fill the constant memory array on host
@@ -98,6 +102,8 @@ int main() {
         }
     }
 
+    CHECK_CUDA(cudaEventRecord(start, 0));
+
     CHECK_CUDA(cudaMemcpy(d_a, h_a, N*sizeof(float), cudaMemcpyHostToDevice));
     // Transfer constant memory data from host to constant memory
     CHECK_CUDA(cudaMemcpyToSymbol(filter, h_kernel, F_len*sizeof(float)));
@@ -105,7 +111,7 @@ int main() {
     int blocksPerGrid = (N + threadsPerBlock - 1)/threadsPerBlock;
     //size_t shmem = (threadsPerBlock + F_len - 1) * sizeof(float);
 
-    convolution<<<blocksPerGrid, threadsPerBlock>>>(d_a, d_c);
+    convolutionFull<<<blocksPerGrid, threadsPerBlock>>>(d_a, d_c);
 
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
@@ -118,7 +124,7 @@ int main() {
     float elapsed_time;
     CHECK_CUDA(cudaEventElapsedTime(&elapsed_time, start, stop));
 
-    cout<<"Elapsed time(in ms) : "<< elapsed_time<<endl;
+    cout<<"Elapsed time(in ms) : "<< elapsed_time<<endl;   // 2.44
 
     for(int i = 0; i< 50 && i<N; i++) {
         cout<<"Convolution result at i:"<<i<<", is: "<<h_c[i]<<endl;
