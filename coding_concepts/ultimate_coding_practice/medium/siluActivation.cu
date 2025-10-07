@@ -18,16 +18,13 @@ using namespace std;
 } while(0)
 
 
-
-// General Leaky ReLU Activation function f = alpha*x if x<=0 otherwise x
-// Here, alpha is in [0, 1], which is similar to original relu (when alpha = 0).
-__global__ void reluActivation(float* a, float* c) {
+// SiLU Activation function f = x * sigmoid(x), where sigmoid(x) = 1/(1+exp(-x))
+__global__ void siluActivation(float* a, float* c) {
 
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    float alpha = 0.01f;  // set alpha in range of [0, 1]
 
     if(tid<N) {
-        c[tid] = fmaxf(a[tid], alpha * a[tid]); // store values per thread
+        c[tid] = a[tid] / (1.0f + expf(-1.0f * a[tid])); // store values per thread
     }
 }
 
@@ -56,7 +53,7 @@ int main() {
 
     int blocksPerGrid = (N + threadsPerBlock - 1)/threadsPerBlock;
 
-    reluActivation<<<blocksPerGrid, threadsPerBlock>>>(d_a, d_c);
+    siluActivation<<<blocksPerGrid, threadsPerBlock>>>(d_a, d_c);
 
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
@@ -69,10 +66,10 @@ int main() {
     float elapsed_time;
     CHECK_CUDA(cudaEventElapsedTime(&elapsed_time, start, stop));
 
-    cout<<"Elapsed time(in ms) : "<< elapsed_time<<endl;  // 2.42
+    cout<<"Elapsed time(in ms) : "<< elapsed_time<<endl;  // 1.85
 
     for(int i = 0; i< 50 && i<N; i++) {
-        cout<<"ReLU activation result at i:"<<i<<", is: "<<h_c[i]<<", original array: "<<h_a[i]<<endl;
+        cout<<"SiLU Activation result at i:"<<i<<", is: "<<h_c[i]<<", original array: "<<h_a[i]<<endl;
     }
 
     CHECK_CUDA(cudaFree(d_a));
