@@ -156,7 +156,7 @@ int main() {
     cout<<"Elapsed time(im ms) for kernel execution is "<<elapsed_time<<endl;  // 1.6
 
     for(int i=0; i< 5; i++) {
-        cout<<"Scanned block sum array at i="<<i<<", is "<<h_b[i]<<endl;
+        cout<<"Scanned block cumulative sum at i="<<i<<", is "<<h_b[i]<<endl;
     }
 
     for(int i=0; i< 50 && i<N; i++) {
