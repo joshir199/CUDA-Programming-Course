@@ -70,7 +70,7 @@ __global__ void softmaxFunction(float* a, float* b, float* c, float* totalSum) {
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     __shared__ float cache[threadsPerBlock];
 
-    int temp = 0.0f; // per thread value storage
+    float temp = 0.0f; // per thread value storage
 
     // load the exponential of each term with handled overflow
     // condition using maximum of each element
@@ -151,7 +151,7 @@ int main() {
     float elapsed_time;
     CHECK_CUDA(cudaEventElapsedTime(&elapsed_time, start, stop));
 
-    cout<<"Elapsed time(in ms) : "<< elapsed_time<<endl;  // 1.71
+    cout<<"Elapsed time(in ms) : "<< elapsed_time<<endl;  // 1.64
 
     for(int i = 0; i< 50 && i<N; i++) {
         cout<<"Softmax function result at i:"<<i<<", is: "<<h_c[i]<<", original array: "<<h_a[i]<<endl;
