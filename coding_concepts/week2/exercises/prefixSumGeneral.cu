@@ -38,7 +38,7 @@ __global__ void kernelPrefixSumPerBlock(int* a, int* c, int* blocks) {
     // Up-sweep phase
     //Do the offset doubling pattern sum for each element
     int i = 1;
-    while(i<N) {
+    while(i<threadsPerBlock) {
         int temp = 0;
         if(cacheId>=i){
             temp = cache[cacheId - i];

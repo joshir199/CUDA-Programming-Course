@@ -32,9 +32,13 @@ __global__ void prefixSumKernelScan1(int* a, int* c, int* b) {
     // incremental thread scan with  2^(i-1) threads idle at i-th step starting at index 0.
     int i = 1;
     while(i<blockDim.x) {
+        int temp = 0;
         if(threadIdx.x >= i) {
-            cache[threadIdx.x] += cache[threadIdx.x - i];
+            temp = cache[threadIdx.x - i];
         }
+        __syncthreads();
+
+        cache[threadIdx.x] += temp;
         __syncthreads();
 
         i = i*2;
