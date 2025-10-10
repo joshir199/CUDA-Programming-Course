@@ -5,7 +5,6 @@
 #include <cuda_runtime.h>
 using namespace std;
 
-
 #define N 1024 // column
 #define M 1024 // row
 #define threadsPerBlock 256
@@ -19,27 +18,20 @@ using namespace std;
     }                                               \
 } while(0)
 
-
-__global__ void sparseMatVecMul(int* values, int* colInd, int* rowptr, int* vec, int* c) {
+// Calculate Sparse Matrix - Vector Multiplication with matrix in COO format
+// Also called SpMV (Sparse Matrix-Vector multiplication)
+__global__ void sparseMatVecMulUsingCOO(int* values, int* colInd, int* rowInd, int* vec, int* c, int nnz) {
 
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    if(tid<M) { // thread per row (M= number of rows)
-        int sum = 0;  // sum variable for result per Row
-        int start = rowptr[tid];  // inclusive
-        int end = rowptr[tid + 1];  // exclusive
-
-        for(int i = start; i<end; i++) {
-            sum += values[i] * vec[colInd[i]];  // values * value at same index in vector
-        }
-        c[tid] = sum;
+    if(tid<nnz) { // thread per non-zero elements
+        // atomically add to certain row of output vector with product of element in matrix with vector
+        atomicAdd(&c[rowInd[tid]], values[tid]*vec[colInd[tid]]);
     }
 }
 
-void getCSRpointers(int* mat, vector<int> &values, vector<int> &colIndex, vector<int> &rowptrs) {
+// Convert Sparse matrix into its COO (Coordinate) format with Column, Row and Values arrays
+void getCOOarrays(int* mat, vector<int> &values, vector<int> &colIndex, vector<int> &rowIndex) {
 
-    int x_val = 0;
-    rowptrs.clear();
-    rowptrs.push_back(0);
     int temp = 0;
 
     for(int i = 0; i<M; i++) {
@@ -48,32 +40,35 @@ void getCSRpointers(int* mat, vector<int> &values, vector<int> &colIndex, vector
             if(temp != 0) {
                 values.push_back(temp);
                 colIndex.push_back(j);
-                x_val++;
+                rowIndex.push_back(i);
             }
         }
-        rowptrs.push_back(x_val);
     }
 }
 
 int main() {
-
+    // Define and create Events
     cudaEvent_t start, stop;
     CHECK_CUDA(cudaEventCreate(&start));
     CHECK_CUDA(cudaEventCreate(&stop));
 
 
+    // define variables for device and host
     int h_a[M*N], h_b[N], h_c[M];
     int *d_b, *d_c;
 
     CHECK_CUDA(cudaMalloc(&d_b, N*sizeof(int)));
     CHECK_CUDA(cudaMalloc(&d_c, M*sizeof(int)));
 
+    // create dummy sparse matrix
     for(int i=0;i<M;i++) {
+        h_c[i] = 0;
         for(int j =0; j<N; j++) {
             h_a[i*M + j] = ((i + j)/2) % 2;
         }
     }
 
+    // create dummy dense vector
     for(int i=0;i<N;i++) {
         h_b[i] = (2*i + 1)%999;
     }
@@ -83,30 +78,33 @@ int main() {
     // the column index of each value ? length = nnz
     vector<int> h_colInd;
     //cumulative count of non-zeros up to each row ? length = M + 1
-    vector<int> h_rowPtr;
+    vector<int> h_rowInd;
 
-    getCSRpointers(h_a, h_values, h_colInd, h_rowPtr);
+    // get COO format arrays
+    getCOOarrays(h_a, h_values, h_colInd, h_rowInd);
 
+    // Number of non-zero elements in Sparse matrix
     int nnz = h_values.size();
 
-    int *d_val, *d_colInd, *d_rowptr;
+    int *d_val, *d_colInd, *d_rowInd;
 
     CHECK_CUDA(cudaMalloc(&d_val, nnz*sizeof(int)));
     CHECK_CUDA(cudaMalloc(&d_colInd, nnz*sizeof(int)));
-    CHECK_CUDA(cudaMalloc(&d_rowptr, (M+1)*sizeof(int)));
-
+    CHECK_CUDA(cudaMalloc(&d_rowInd, nnz*sizeof(int)));
 
     CHECK_CUDA(cudaEventRecord(start, 0));
 
     CHECK_CUDA(cudaMemcpy(d_b, h_b, N*sizeof(int), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(d_val, h_values.data(), nnz*sizeof(int), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(d_colInd, h_colInd.data(), nnz*sizeof(int), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(d_rowptr, h_rowPtr.data(), (M+1)*sizeof(int), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(d_rowInd, h_rowInd.data(), nnz*sizeof(int), cudaMemcpyHostToDevice));
+    // Initialize the output vector with zero and pass it to device
+    CHECK_CUDA(cudaMemcpy(d_c, h_c, M*sizeof(int), cudaMemcpyHostToDevice));
 
-    int blocksPerGrid = (M + threadsPerBlock - 1)/threadsPerBlock;
+    // Launch NNZ (non-zero elements) size of threads
+    int blocksPerGrid = (nnz + threadsPerBlock - 1)/threadsPerBlock;
 
-    sparseMatVecMul<<<blocksPerGrid, threadsPerBlock>>>(d_val, d_colInd, d_rowptr, d_b, d_c);
-
+    sparseMatVecMulUsingCOO<<<blocksPerGrid, threadsPerBlock>>>(d_val, d_colInd, d_rowInd, d_b, d_c, nnz);
 
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
@@ -119,10 +117,10 @@ int main() {
     float elapsed_time;
     CHECK_CUDA(cudaEventElapsedTime(&elapsed_time, start, stop));
 
-    cout<<"ELapsed time(in ms) is "<<elapsed_time<<endl; //0.59
+    cout<<"ELapsed time(in ms) is "<<elapsed_time<<endl; //0.77
 
     for(int i = 0; i< nnz && i<20; i++) {
-        cout<<"CSR indexing format at i:"<<i<<", colId:"<<h_colInd[i]<<", value:"<<h_values[i]<<endl;
+        cout<<"COO indexing format at i:"<<i<<", colId:"<<h_colInd[i]<<", Value:"<<h_values[i]<<endl;
     }
     for(int i = 0; i< N && i<20; i++) {
         cout<<"Vector at i:"<<i<<", is "<<h_b[i]<<endl;
@@ -131,7 +129,7 @@ int main() {
         cout<<"Sparse Matrix-Vector multiplication using at i:"<<i<<" is "<<h_c[i]<<endl;
     }
 
-    CHECK_CUDA(cudaFree(d_rowptr));
+    CHECK_CUDA(cudaFree(d_rowInd));
     CHECK_CUDA(cudaFree(d_val));
     CHECK_CUDA(cudaFree(d_colInd));
     CHECK_CUDA(cudaFree(d_b));
