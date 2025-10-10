@@ -23,7 +23,7 @@ using namespace std;
 // Therefore, read/write to shared memory is very fast
 __global__ void kernelHistogramShared(int* a, int* c){
 
-    __shared__ int cache[threadsPerBlock]; // shared memory for each block
+    extern __shared__ int cache[]; // shared memory for each block assigned dynamically during kernel launch
     int cacheIdx = threadIdx.x;   // threadId in each block
 
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -52,7 +52,7 @@ int main() {
     cudaEvent_t start, stop;
     CHECK_CUDA(cudaEventCreate(&start));
     CHECK_CUDA(cudaEventCreate(&stop));
-    CHECK_CUDA(cudaEventRecord(start, 0));
+
 
     // define the vector for histogram computation for host and device
     int h_a[bufferSize], h_c[N];
@@ -67,6 +67,8 @@ int main() {
         h_a[i] = rand() % 256;
     }
 
+    CHECK_CUDA(cudaEventRecord(start, 0));
+
     // transfer data to device
     CHECK_CUDA(cudaMemcpy(d_a, h_a, bufferSize*sizeof(int), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemset(d_c, 0, N*sizeof(int)));
@@ -74,7 +76,10 @@ int main() {
     int blocksPerGrid = 48 * 2;  // 48 is number of Multiprocessor in this GPU
                                 // And, this number of grids are for best performance
 
-    kernelHistogramShared<<<blocksPerGrid, threadsPerBlock>>>(d_a, d_c);
+    // assigning dynamic memory size to shared memory
+    size_t shmem = (threadsPerBlock)*sizeof(int);
+
+    kernelHistogramShared<<<blocksPerGrid, threadsPerBlock, shmem>>>(d_a, d_c);
 
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
@@ -88,12 +93,14 @@ int main() {
     float elapsed_time;
     CHECK_CUDA(cudaEventElapsedTime(&elapsed_time, start, stop));
 
-    cout<<"Elapsed time(in ms) : "<<elapsed_time<<endl;  // Elapsed time(in ms) : 11.55
+    cout<<"Elapsed time(in ms) : "<<elapsed_time<<endl;  // Elapsed time(in ms) : 0.38
 
     long sum = 0;
     for(int i = 0 ; i<N;i++){
         sum += h_c[i];
-        cout<<"frequency at index i = "<<i<<" is "<<h_c[i]<<endl;
+        if(i<50) {
+            cout<<"frequency at index i = "<<i<<" is "<<h_c[i]<<endl;
+        }
     }
     cout<<"Is total count matching : "<<(999999 == sum)<<endl;
 
