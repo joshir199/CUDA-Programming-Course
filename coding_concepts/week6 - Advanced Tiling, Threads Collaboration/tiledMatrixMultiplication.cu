@@ -53,17 +53,17 @@ __global__ void tiledMatMul(float* a, float* b, float* c) {
         int globaly_r = i*Tile + localy_r; // b[globaly_r, x_c] vary along vertical per thread
 
         // load the data into shared memory per tileA for matrix B [M x N]
-        if(localx_c < Tile && localy_r < Tile) {
-            cachetileA[localx_c][localy_r] = a[y_r * N + globalx_c];
+        if(globalx_c < N && y_r < M) {
+            cachetileA[localy_r][localx_c] = a[y_r * N + globalx_c];
         } else {
-            cachetileA[localx_c][localy_r] = 0.0f;
+            cachetileA[localy_r][localx_c] = 0.0f;
         }
 
         // load the data into shared memory per tileB for matrix B [N x K]
-        if(localx_c < Tile && localy_r < Tile) {
-            cachetileB[localx_c][localy_r] = b[globaly_r * K + x_c];
+        if(x_c < K && globaly_r < N) {
+            cachetileB[localy_r][localx_c] = b[globaly_r * K + x_c];
         } else {
-            cachetileB[localx_c][localy_r] = 0.0f;
+            cachetileB[localy_r][localx_c] = 0.0f;
         }
 
         __syncthreads();
