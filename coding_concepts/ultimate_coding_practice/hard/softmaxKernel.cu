@@ -2,13 +2,13 @@
 #include <cstdlib>
 #include <ctime>
 #include <cmath>
+#include <cfloat>
 #include <cuda_runtime.h>
 using namespace std;
 
 
 #define N 999999
 #define threadsPerBlock 256
-#define FLT_MAX INFINITY
 
 #define CHECK_CUDA(call) do {                    \
     cudaError_t e = (call);                      \
@@ -36,6 +36,22 @@ __device__ float atomicMaxFloat(float* address, float val) {
     return __int_as_float(old);
 }
 
+__device__ float atomicAddFloat(float* address, float val) {
+    int* address_as_i = (int*)address;
+    int old = *address_as_i;
+    int assumed;
+    do {
+        assumed = old;
+        // convert assumed bits to float, compare with val, choose greater
+        float assumed_f = __int_as_float(assumed);
+        float new_f = val + assumed_f;
+        int new_i = __float_as_int(new_f);
+        // try to CAS swap
+        old = atomicCAS(address_as_i, assumed, new_i);
+    } while (assumed != old);
+    return __int_as_float(old);
+}
+
 // Get Max value to handle potential overflow issues
 __global__ void getMaxValue(float* a, float* c) {
 
@@ -47,6 +63,7 @@ __global__ void getMaxValue(float* a, float* c) {
     } else {
         cache[threadIdx.x] = -FLT_MAX;
     }
+    __syncthreads();  // shared memory is getting allocated
 
     int i = threadsPerBlock/2;
     while(i>0) {
@@ -59,9 +76,8 @@ __global__ void getMaxValue(float* a, float* c) {
 
     // Now get the max from each block through atomicMax operation
     if(threadIdx.x == 0) {
-        atomicMaxFloat(c, cache[threadIdx.x]);
+        atomicMaxFloat(c, cache[0]);  // use custom Max function for float values
     }
-    __syncthreads();
 }
 
 
@@ -76,6 +92,7 @@ __global__ void softmaxFunction(float* a, float* b, float* c, float* totalSum) {
     // condition using maximum of each element
     if(tid<N) {
         temp = expf(a[tid] - *b);
+        c[tid] = temp;  // store temporary exponential values per element
     }
     cache[threadIdx.x] = temp;
     __syncthreads();
@@ -93,18 +110,16 @@ __global__ void softmaxFunction(float* a, float* b, float* c, float* totalSum) {
     // into single variable (variable should be global rather than local
     // thread because it will reset to zero every iterations)
     if(threadIdx.x == 0) {
-        atomicAdd(totalSum, cache[threadIdx.x]);
+        atomicAddFloat(totalSum, cache[0]); //use custom Max function for float values
     }
-    __syncthreads();
-
-    // Now, use the softmax formula to calculate for each term
-    if(tid<N) {
-        c[tid] = temp / *totalSum ;
-    }
-
 }
 
-
+__global__ void normalizeSoftmax(float totalSum, float* c) {
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    if(tid<N) {
+        c[tid] = c[tid]/totalSum;
+    }
+}
 
 
 int main() {
@@ -114,7 +129,7 @@ int main() {
     CHECK_CUDA(cudaEventCreate(&stop));
 
 
-    float h_a[N], h_c[N];
+    float h_a[N], h_c[N], h_max, h_totalSum;
     float *d_a, *d_b, *d_c, *totalSum;
 
     CHECK_CUDA(cudaMalloc(&d_a, N*sizeof(float)));
@@ -137,12 +152,23 @@ int main() {
     getMaxValue<<<blocksPerGrid, threadsPerBlock>>>(d_a, d_b);
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
+    CHECK_CUDA(cudaMemcpy(&h_max, d_b, sizeof(float), cudaMemcpyDeviceToHost));
 
     softmaxFunction<<<blocksPerGrid, threadsPerBlock>>>(d_a, d_b, d_c, totalSum);
 
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
+    CHECK_CUDA(cudaMemcpy(&h_totalSum, totalSum, sizeof(float), cudaMemcpyDeviceToHost));
 
+    cout<<"Max Value : "<< h_max<< ", Total Sum: "<< h_totalSum <<endl; // 4.8   && 258469
+
+    // most important condition while doing any division
+    if(h_totalSum == 0.0f) {
+        h_totalSum += 0.000001; // add epsilon = 10^-5 to avoid division be zero
+    }
+    normalizeSoftmax<<<blocksPerGrid, threadsPerBlock>>>(h_totalSum, d_c);
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
     CHECK_CUDA(cudaMemcpy(h_c, d_c, N*sizeof(float), cudaMemcpyDeviceToHost));
 
     CHECK_CUDA(cudaEventRecord(stop, 0));
@@ -151,7 +177,7 @@ int main() {
     float elapsed_time;
     CHECK_CUDA(cudaEventElapsedTime(&elapsed_time, start, stop));
 
-    cout<<"Elapsed time(in ms) : "<< elapsed_time<<endl;  // 1.64
+    cout<<"Elapsed time(in ms) : "<< elapsed_time<<endl;  // 2.7
 
     for(int i = 0; i< 50 && i<N; i++) {
         cout<<"Softmax function result at i:"<<i<<", is: "<<h_c[i]<<", original array: "<<h_a[i]<<endl;
@@ -160,6 +186,7 @@ int main() {
     CHECK_CUDA(cudaFree(d_a));
     CHECK_CUDA(cudaFree(d_b));
     CHECK_CUDA(cudaFree(d_c));
+    CHECK_CUDA(cudaFree(totalSum));
     CHECK_CUDA(cudaEventDestroy(start));
     CHECK_CUDA(cudaEventDestroy(stop));
 
