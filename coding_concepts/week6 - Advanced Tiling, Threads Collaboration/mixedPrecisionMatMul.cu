@@ -1,13 +1,14 @@
 #include <iostream>
 #include <cstdlib>
 #include <ctime>
+#include <cuda_fp16.h>  // to handle Floating Point 16 (FP16) of half precision
 #include <cuda_runtime.h>
 using namespace std;
 
 
-#define N 768
-#define M 768 // With tiling, it can handle the size of 768 for each
-#define K 768
+#define n 768
+#define m 768 // With tiling, it can handle the size of 768 for each
+#define k 768
 #define Tile 16  // keep it same as block size
 
 #define threadsDim 16  // keeping the dimension 16 x 16 as multiple of warps 32
@@ -21,14 +22,9 @@ using namespace std;
     }                                               \
 } while(0)
 
-// Matrix Multiplication using tiled sub-matrix.
-// tileA of size [Tile x Tile] will move along column of matrix A and tileB will
-// move along the rows of the matrix B. Since, we have each block of same size as Tile
-// Flops per block = 2 * Tile * Tile * N (each tile output does N multiply&Add operation)
-// Number of global memory read = 2 * Tile * Tile * (N/Tile) = 2 * Tile * N (number of operations per step * number of steps)
-// Arithmetic Intensity = Flops per block / global memory reads = Tile
-// Thus, larger Tile -> more memory efficient but may overcrowd the shared memory.
-__global__ void tiledMatMul(float* a, float* b, float* c) {
+
+
+__global__ void tiledMatMul(const __half* a, const __half* b, float* c, int M, int N, int K) {
 
     int x_c = threadIdx.x + blockIdx.x * blockDim.x;  // column index
     int y_r = threadIdx.y + blockIdx.y * blockDim.y;  // row index
@@ -40,7 +36,7 @@ __global__ void tiledMatMul(float* a, float* b, float* c) {
     // Now, for each tile we will calculate the partial product sum along common dimension
     int numTiles = (N + Tile - 1)/Tile;
 
-    float partialSum = 0.0f;
+    float partialSum = 0.0f; // matrix multiplication in FP32 precision for accuracy
 
     for(int i = 0; i< numTiles; i++) {
 
@@ -53,15 +49,17 @@ __global__ void tiledMatMul(float* a, float* b, float* c) {
         int globaly_r = i*Tile + localy_r; // b[globaly_r, x_c] vary along vertical per thread
 
         // load the data into shared memory per tileA for matrix A [M x N]
+        // First, convert the FP16 to FP32 to avoid any loss in precision while doing Sum/Mul
         if(globalx_c < N && y_r < M) {
-            cachetileA[localy_r][localx_c] = a[y_r * N + globalx_c];
+            cachetileA[localy_r][localx_c] = __half2float(a[y_r * N + globalx_c]);
         } else {
             cachetileA[localy_r][localx_c] = 0.0f;
         }
 
         // load the data into shared memory per tileB for matrix B [N x K]
+        // First, convert the FP16 to FP32 to avoid any loss in precision while doing Sum/Mul
         if(x_c < K && globaly_r < N) {
-            cachetileB[localy_r][localx_c] = b[globaly_r * K + x_c];
+            cachetileB[localy_r][localx_c] = __half2float(b[globaly_r * K + x_c]);
         } else {
             cachetileB[localy_r][localx_c] = 0.0f;
         }
@@ -76,10 +74,23 @@ __global__ void tiledMatMul(float* a, float* b, float* c) {
         __syncthreads();
     }
 
-    // copy the data per thread into the output matrix C [M x K]
+    // copy the data per thread into the output matrix C [MxK]
     if(x_c < K && y_r < M) {
         c[y_r * K + x_c] = partialSum;
     }
+}
+
+// General Mixed Precision Matrix Multiplication : C = alpha*(AxB) + beta*C
+// AxB is calculated in FP32 and later added with C as FP32 and finally converted back to FP16.
+//  __half2float : FP16 to FP32  (half to full precision)
+//  __float2half : FP32 to FP16  (full to half precision)
+__global__ void multiplierKernel(float* a, __half* c, int M, int N, float alpha, float beta) {
+    int tid = threadIdx.x + blockIdx.x * blockDim.x ;
+    if(tid<M*N) {
+        // do operation in FP32 and quantize back to FP16 as output
+        c[tid] = __float2half(beta * __half2float(c[tid])  +  alpha * a[tid]);
+    }
+
 }
 
 
@@ -90,36 +101,54 @@ int main() {
     CHECK_CUDA(cudaEventCreate(&start));
     CHECK_CUDA(cudaEventCreate(&stop));
 
-    float h_a[M*N], h_b[N*K], h_c[M*K];
-    float *d_a, *d_b, *d_c;
+    int M = m;
+    int N = n;
+    int K = k;
+    float alpha = 0.8f;
+    float beta = 0.3f;
 
-    CHECK_CUDA(cudaMalloc(&d_a, M*N*sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_b, N*K*sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_c, M*K*sizeof(float)));
+    __half h_a[M*N], h_b[N*K], h_c[M*K]; // define FP16 data
+    __half *d_a, *d_b, *d_c;
+    float *d_ab;
+
+    CHECK_CUDA(cudaMalloc(&d_a, M*N*sizeof(__half)));
+    CHECK_CUDA(cudaMalloc(&d_b, N*K*sizeof(__half)));
+    CHECK_CUDA(cudaMalloc(&d_c, M*K*sizeof(__half)));
+    CHECK_CUDA(cudaMalloc(&d_ab, M*K*sizeof(float)));
 
     // fill data in host device
     for(int i=0; i<M*N ;i++) {
-        h_a[i] = (rand() % 90) * 0.018f;
+        h_a[i] = __float2half((rand() % 90) * 0.018f);
     }
     for(int i = 0; i<N*K; i++){
-        h_b[i] = (rand() % 19) * 0.018f;
+        h_b[i] = __float2half((rand() % 19) * 0.018f);
+    }
+    for(int i=0; i<M*K ;i++) {
+        h_c[i] = __float2half((rand() % 90) * 0.018f);
     }
 
 
-    CHECK_CUDA(cudaMemcpy(d_a, h_a, M*N*sizeof(float), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(d_b, h_b, N*K*sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(d_a, h_a, M*N*sizeof(__half), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(d_b, h_b, N*K*sizeof(__half), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(d_c, h_c, M*K*sizeof(__half), cudaMemcpyHostToDevice));
 
     CHECK_CUDA(cudaEventRecord(start, 0));
 
     dim3 block(threadsDim, threadsDim);
     dim3 grid((K+threadsDim-1)/threadsDim, (M+threadsDim-1)/threadsDim);
 
-    tiledMatMul<<<grid, block>>>(d_a, d_b, d_c);
+    tiledMatMul<<<grid, block>>>(d_a, d_b, d_ab, M, N, K);
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
+
+    int threadsPerBlock = threadsDim * threadsDim;
+    int blocksPerGrid = (M*K + threadsPerBlock - 1)/threadsPerBlock;
+    multiplierKernel<<<blocksPerGrid, threadsPerBlock>>>(d_ab, d_c, M, K, alpha, beta);
 
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
 
-    CHECK_CUDA(cudaMemcpy(h_c, d_c, M*K*sizeof(float), cudaMemcpyDeviceToHost));
+    CHECK_CUDA(cudaMemcpy(h_c, d_c, M*K*sizeof(__half), cudaMemcpyDeviceToHost));
 
     CHECK_CUDA(cudaEventRecord(stop, 0));
     CHECK_CUDA(cudaEventSynchronize(stop));
@@ -127,15 +156,17 @@ int main() {
     float elapsed_time;
     CHECK_CUDA(cudaEventElapsedTime(&elapsed_time, start, stop));
 
-    cout<<"GPU Elapsed time(in ms) : "<< elapsed_time<<endl;  // 0.72  (for 384 compared to simple) //1.76 for all 768
+    cout<<"GPU Elapsed time(in ms) : "<< elapsed_time<<endl;  // 1.09
 
+    // Cannot print FP16 directly, so convert it into FP32 first
     for(int i = 0; i< 50 && i<M*K; i++) {
-        cout<<"Matrix Multiplication result at col + K*Row:"<<i<<", is: "<<h_c[i]<<endl;
+        cout<<"Mixed Precision Matrix Multiplication at col + K*Row:"<<i<<", is: "<<__half2float(h_c[i])<<endl;
     }
 
     CHECK_CUDA(cudaFree(d_a));
     CHECK_CUDA(cudaFree(d_b));
     CHECK_CUDA(cudaFree(d_c));
+    CHECK_CUDA(cudaFree(d_ab));
     CHECK_CUDA(cudaEventDestroy(start));
     CHECK_CUDA(cudaEventDestroy(stop));
 
