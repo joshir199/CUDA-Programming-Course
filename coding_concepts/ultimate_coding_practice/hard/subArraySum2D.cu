@@ -22,9 +22,10 @@ __global__ void subarraySum2D(int* a, int* b, int rs, int re, int cs, int ce, in
     // Each block stores individual rows
     extern __shared__ int cache[];  //per block cache shared memory of size (ce - cs + 1) (column size)
 
+    int rowStart = (blockIdx.x + rs) * M;
     // threads cooperating to load the data into shared memory
     for(int i = threadIdx.x; i<(ce - cs + 1); i+=blockDim.x) {
-        int gIdx = blockIdx.x * M + cs + i;
+        int gIdx = rowStart + cs + i;
         cache[i] = a[gIdx];
     }
     __syncthreads();
@@ -39,19 +40,22 @@ __global__ void subarraySum2D(int* a, int* b, int rs, int re, int cs, int ce, in
     __syncthreads();
 
 
-    // Now, we will do per block sum using atomics
-    // Initialize the per blockSum variable
-    __shared__ int blockSum;
-    if(threadIdx.x == 0) { blockSum = 0;}
+    // Use shared memory reduction instead of atomicAdd (good for Max)
+    __shared__ int blockCache[256]; // assuming <=256 threads per block
+    blockCache[threadIdx.x] = localSum;
     __syncthreads();
 
-    // Get per block sum
-    atomicAdd(&blockSum, localSum);
-    __syncthreads();
+    // Parallel Reduction
+    for (int i = blockDim.x / 2; i > 0; i >>= 1) {
+        if (threadIdx.x < i) {
+            blockCache[threadIdx.x] += blockCache[threadIdx.x + i];
+        }
+        __syncthreads();
+    }
 
     //Copy the sum into output array
     if(threadIdx.x == 0) {
-        b[blockIdx.x] = blockSum;
+        b[blockIdx.x] = blockCache[0];
     }
 }
 
@@ -152,7 +156,7 @@ int main() {
         cout<<"per row sum : "<< h_b[i]<<endl;
     }
 
-    cout<<"Total 2D subarray sum is: "<<h_c<<endl;  // Subarray sum = 249498
+    cout<<"Total 2D subarray sum is: "<<h_c<<endl;  // Subarray sum = 238837
 
     CHECK_CUDA(cudaFree(d_a));
     CHECK_CUDA(cudaFree(d_b));
