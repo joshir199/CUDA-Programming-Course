@@ -77,7 +77,7 @@ int main() {
     int h_a[N*M*K], h_c, P;
     int *d_a, *d_c;
 
-    CHECK_CUDA(cudaMalloc(&d_a, N*M*sizeof(int)));
+    CHECK_CUDA(cudaMalloc(&d_a, N*M*K*sizeof(int)));
     CHECK_CUDA(cudaMalloc(&d_c, sizeof(int)));
 
     // fill data in host device
