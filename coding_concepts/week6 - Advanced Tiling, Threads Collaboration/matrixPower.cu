@@ -23,7 +23,7 @@ using namespace std;
 // Calculate power of matrix using formula:
 //  For P as some positive integer:
 //  C = A^P = A^(P-1) x A , A = Input Square matrix
-__global__ void matMul(float* c, const float* a, int N) {
+__global__ void matMul(float* a, float* b, float* c, int N) {
     int x_c = threadIdx.x + blockDim.x * blockIdx.x;
     int y_r = threadIdx.y + blockDim.y * blockIdx.y;
 
@@ -42,21 +42,21 @@ __global__ void matMul(float* c, const float* a, int N) {
 
         //Load data from matrix C to tileA
         if(y_r<N && globalx_c< N){
-            cacheTileA[localy_r][localx_c] = c[y_r * N + globalx_c];
+            cacheTileA[localy_r][localx_c] = a[y_r * N + globalx_c];
         } else {
             cacheTileA[localy_r][localx_c] = 0.0f;
         }
 
         //Load data from matrix A to tileB
         if(globaly_r<N && x_c< N){
-            cacheTileB[localy_r][localx_c] = a[globaly_r * N + x_c];
+            cacheTileB[localy_r][localx_c] = b[globaly_r * N + x_c];
         } else {
             cacheTileB[localy_r][localx_c] = 0.0f;
         }
         __syncthreads();
 
-        for(int i=0; i< Tile; i++) {
-            partialsum += cacheTileA[localy_r][i] * cacheTileB[i][localx_c];
+        for(int k=0; k< Tile; k++) {
+            partialsum += cacheTileA[localy_r][k] * cacheTileB[k][localx_c];
         }
         __syncthreads();
     }
@@ -77,15 +77,16 @@ int main() {
     int N=n;
     int P;
     float h_a[N*N], h_c[N*N];
-    float *d_a, *d_c;
+    float *d_a, *d_b, *d_c;
 
     CHECK_CUDA(cudaMalloc(&d_a, N*N*sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_b, N*N*sizeof(float)));
     CHECK_CUDA(cudaMalloc(&d_c, N*N*sizeof(float)));
 
     // fill data in host device
     for(int i=0; i<N;i++) {
         for(int j=0; j<N;j++) {
-            h_a[i*N + j] = (rand() % 9) * 0.018f; 
+            h_a[i*N + j] = (rand() % 9) * 0.018f;
         }
     }
     P = 7;
@@ -98,9 +99,12 @@ int main() {
     dim3 block(threadsDim, threadsDim);
     dim3 grid((N+threadsDim-1)/threadsDim, (N+threadsDim-1)/threadsDim);
     for(int i = 1; i< P; i++) {
-        matMul<<<grid, block>>>(d_c, d_a, N);
+        matMul<<<grid, block>>>(d_a, d_c, d_b, N);
         CHECK_CUDA(cudaGetLastError());
         CHECK_CUDA(cudaDeviceSynchronize());
+        float* temp = d_c;
+        d_c = d_b;
+        d_b = temp;
     }
 
     CHECK_CUDA(cudaMemcpy(h_c, d_c, N*N*sizeof(float), cudaMemcpyDeviceToHost));
@@ -118,6 +122,7 @@ int main() {
     }
 
     CHECK_CUDA(cudaFree(d_a));
+    CHECK_CUDA(cudaFree(d_b));
     CHECK_CUDA(cudaFree(d_c));
     CHECK_CUDA(cudaEventDestroy(start));
     CHECK_CUDA(cudaEventDestroy(stop));
