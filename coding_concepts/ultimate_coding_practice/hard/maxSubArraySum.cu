@@ -6,6 +6,8 @@ using namespace std;
 
 #define n 999999
 #define threadsPerBlock 256
+#define W 289 // When window length (10K x 4B = 40KB < Shared memory limit)
+// If window length > 10K, use prefix sum to get max. subarray window in O(N)
 
 #define max(a,b) (a>b)?a:b
 
@@ -109,7 +111,7 @@ int main() {
     for(int i=0; i<N ;i++) {
         h_a[i] = (i*i + 3*i + 6)%13;
     }
-    w = 289;
+    w = W;
 
     CHECK_CUDA(cudaEventRecord(start, 0));
 
