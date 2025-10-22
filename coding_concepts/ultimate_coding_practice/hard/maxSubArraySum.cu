@@ -66,7 +66,7 @@ __global__ void getFinalMaxValue(int* a, int* c, int N) {
     if(tid<N) {
         cache[threadIdx.x] = a[tid];
     } else {
-        cache[threadIdx.x] = -INT_MAX;
+        cache[threadIdx.x] = INT_MIN;
     }
     __syncthreads();
 
@@ -98,10 +98,12 @@ int main() {
     int N=n;
     int h_a[N], h_c, w;
     int *d_a, *d_b, *d_c;
+    int minValue = INT_MIN;
 
     CHECK_CUDA(cudaMalloc(&d_a, N*sizeof(int)));
     CHECK_CUDA(cudaMalloc(&d_c, sizeof(int)));
-    CHECK_CUDA(cudaMemset(d_c, 0, sizeof(int)));
+    // Prefer to use cudaMemcpy for copying MAX or MIN values
+    CHECK_CUDA(cudaMemcpy(d_c, &minValue, sizeof(int), cudaMemcpyHostToDevice));
 
     // fill data in host device
     for(int i=0; i<N ;i++) {
