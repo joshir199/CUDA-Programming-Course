@@ -8,7 +8,7 @@ using namespace std;
 #define m 899999
 #define n 100000
 #define threadsPerBlock 256
-#define Tile 256  // keep it same as threadsPerBlock for minimal storage of elements per block
+#define Tile 256  // keep it same as threadsPerblock for minimal storage of elements per block
 
 #define min(a,b) ((a) < (b) ? a : b)
 #define max(a,b) ((a) > (b) ? a : b)
@@ -77,7 +77,13 @@ __device__ void mergeSequential(int* a, int M, int* b, int N, int* c) {
 
 
 // Merge the index segments from A and B into C in parallel
-//
+// Use shared memory tiles to coalesce global reads (each tile loads a chunk from A and B).
+// Global writes are coalesced :
+//   - each block reads continuous subarrays of A and B
+//   - each thread writes a contiguous portion of C).
+// While effective, the drawbacks include:
+// Each tile load → ~2× global reads per output tile. (2*(M + N))
+// Shared memory mostly half-used.
 __global__ void tiledParallelMerge(int* a, int* b, int* c, int M, int N) {
 
     // each block will calculate elementsPerBLock of the output
@@ -90,6 +96,8 @@ __global__ void tiledParallelMerge(int* a, int* b, int* c, int M, int N) {
     //Get current and next output index per block
     int k_cur = elementsPerBLock * blockIdx.x;
     int k_next = min((blockIdx.x + 1)*elementsPerBLock , M+N);
+
+    if(k_cur >= M+N) { return;} // check on index limit
 
     // Now, we will calculate the co-rank index from A
     int i_cur = get_Co_rank(a, b, M, N, k_cur);
@@ -150,7 +158,7 @@ int main() {
     CHECK_CUDA(cudaMemcpy(d_a, h_a, M*sizeof(int), cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(d_b, h_b, N*sizeof(int), cudaMemcpyHostToDevice));
 
-    int blocksPerGrid = (M+N + threadsPerBlock - 1)/threadsPerBlock;
+    int blocksPerGrid = (M+N + threadsPerBlock - 1)/threadsPerBlock; // can use different block size
 
     tiledParallelMerge<<<blocksPerGrid, threadsPerBlock>>>(d_a, d_b, d_c, M, N);
 
