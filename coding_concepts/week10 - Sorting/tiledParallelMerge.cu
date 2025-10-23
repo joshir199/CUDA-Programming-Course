@@ -8,6 +8,7 @@ using namespace std;
 #define m 899999
 #define n 100000
 #define threadsPerBlock 256
+#define Tile 256  // keep it same as threadsPerBlock for minimal storage of elements per block
 
 #define min(a,b) ((a) < (b) ? a : b)
 #define max(a,b) ((a) > (b) ? a : b)
@@ -76,19 +77,19 @@ __device__ void mergeSequential(int* a, int M, int* b, int N, int* c) {
 
 
 // Merge the index segments from A and B into C in parallel
-// While each threads handling multiple elements of output, the memory
-// access is not coalesced because consecutive threads are not accessing
-// consecutive memory address because of scattered co_rank per output index
-__global__ void parallelMerge(int* a, int* b, int* c, int M, int N) {
+//
+__global__ void tiledParallelMerge(int* a, int* b, int* c, int M, int N) {
 
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    int totalThreads = blockDim.x * gridDim.x;
-    int elementsPerThread = (M+N + totalThreads -1)/totalThreads;
+    // each block will calculate elementsPerBLock of the output
+    // by storing into the shared memory
+    int elementsPerBLock = (M + N + gridDim.x - 1)/gridDim.x;
 
+    __shared__ int cacheA[Tile]; // shared memory for array A
+    __shared__ int cacheB[Tile]; // shared memory for array B
 
-    //Get current and next output index
-    int k_cur = tid * elementsPerThread;
-    int k_next = min((tid + 1) * elementsPerThread, M+N);
+    //Get current and next output index per block
+    int k_cur = elementsPerBLock * blockIdx.x;
+    int k_next = min((blockIdx.x + 1)*elementsPerBLock , M+N);
 
     // Now, we will calculate the co-rank index from A
     int i_cur = get_Co_rank(a, b, M, N, k_cur);
@@ -98,9 +99,23 @@ __global__ void parallelMerge(int* a, int* b, int* c, int M, int N) {
     int j_cur = k_cur - i_cur;
     int j_next = k_next - i_next;
 
-    // Now, we can merge the elements using a thread for intervals between cur & next.
+    // length of segment in A and B per block
+    int sizeA = i_next - i_cur;
+    int sizeB = j_next - j_cur;
 
-    mergeSequential(&a[i_cur], i_next - i_cur, &b[j_cur], j_next - j_cur, &c[k_cur]);
+    // Load elements into the shared memory for processing per block
+    for(int i = threadIdx.x; i<sizeA; i+= blockDim.x) {
+        cacheA[i] = a[i_cur + i];
+    }
+    for(int i = threadIdx.x; i<sizeB; i+= blockDim.x) {
+        cacheB[i] = b[j_cur + i];
+    }
+    __syncthreads();
+
+    // Now, we can merge the elements using single thread for elements in shared memory.
+    if(threadIdx.x == 0) {
+        mergeSequential(cacheA, sizeA, cacheB, sizeB, &c[k_cur]);
+    }
 }
 
 
@@ -137,7 +152,7 @@ int main() {
 
     int blocksPerGrid = (M+N + threadsPerBlock - 1)/threadsPerBlock;
 
-    parallelMerge<<<blocksPerGrid, threadsPerBlock>>>(d_a, d_b, d_c, M, N);
+    tiledParallelMerge<<<blocksPerGrid, threadsPerBlock>>>(d_a, d_b, d_c, M, N);
 
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
@@ -150,7 +165,7 @@ int main() {
     float elapsed_time;
     CHECK_CUDA(cudaEventElapsedTime(&elapsed_time, start, stop));
 
-    cout<<"Elapsed time(in ms) : "<< elapsed_time<<endl;  // 1.78
+    cout<<"Elapsed time(in ms) : "<< elapsed_time<<endl;  // 1.92
 
 
     for(int i = 0; i< 50 && i<(M+N); i++) {
