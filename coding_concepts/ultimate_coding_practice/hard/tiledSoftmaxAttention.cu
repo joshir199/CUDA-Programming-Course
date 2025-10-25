@@ -83,24 +83,27 @@ __global__ void softmaxFunction(float* a, float* c, int M, int N) {
     // After getting per thread Max value, we can call stage 2
     // Stage 2 — Inter-thread reduction (could be tree-based)
     //  - Combine blockDim.x local maxima.
-    //  - O(log₂(blockDim.x)) time if you use tree-based reduction in shared memory.
-    // But we can avoid this by using atomic operation on these small number of threads
-    __shared__ float blockMax; // per block max element
-    if (threadIdx.x == 0) blockMax = -FLT_MAX; // initialize the memory
+    //  - O(log₂(blockDim.x)) time if you use tree-based reduction in shared memory
+    __shared__ float blockMax[256];  // threads Per block = 256
+    blockMax[threadIdx.x] = localMaxVal;
     __syncthreads();
 
-    // calculate per block maximum using atomic
-    atomicMaxFloat(&blockMax, localMaxVal);
-    __syncthreads();
+    // Use parallel reduction
+    for(int i = blockDim.x/2; i>0; i/=2) {
+        if(threadIdx.x < i) {
+            blockMax[threadIdx.x] = fmaxf(blockMax[threadIdx.x], blockMax[threadIdx.x + i])
+        }
+        __syncthreads();
+    }
 
-    float maxVal = blockMax; // it converts per thread values per block
 
+    // ******************* Part 2 *********************************
     // Now, we will do the similar operation for getting exponential sums per block and later
     // calculate normalised softmax values
     // get the exponential of (elements - maxElement per row) for numerical stability
     // each threads loads multiple elements (as N can be 100000)
     for(int i=threadIdx.x; i<N; i+=blockDim.x) {
-        cacheSum[i] = expf(a[i + rowOffset] - maxVal);
+        cacheSum[i] = expf(a[i + rowOffset] - blockMax[0]);
     }
     __syncthreads();
 
@@ -112,6 +115,7 @@ __global__ void softmaxFunction(float* a, float* c, int M, int N) {
     }
     __syncthreads();
 
+    // 2. For Inter-thread processing, lets use Atomic operation here
     __shared__ float blockSum; // for each block (or row)
     if (threadIdx.x == 0) blockSum = 0.0f; // initialize the memory
     __syncthreads();
@@ -177,9 +181,10 @@ __global__ void matMul(float* a, float* b, float* c, int M, int d, int N, bool s
         }
         __syncthreads();
 
-        for(int i=0; i< Tile; i++) {
-            partialsum += cacheTileA[localy_r][i] * cacheTileB[i][localx_c];
+        for(int k=0; k< Tile; k++) {
+            partialsum += cacheTileA[localy_r][k] * cacheTileB[k][localx_c];
         }
+        __syncthreads();
 
     }
 
