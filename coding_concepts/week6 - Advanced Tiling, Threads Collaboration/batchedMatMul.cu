@@ -5,12 +5,11 @@
 using namespace std;
 
 
-#define N 768
-#define M 768 // With tiling, it can handle the size of 768 for each
-#define K 768
-#define Tile 16  // keep it same as block size
-
-#define threadsDim 16  // keeping the dimension 16 x 16 as multiple of warps 32
+#define n 256
+#define m 64    
+#define k 128  
+#define bch 32   // batch size
+#define Tile 16  // keep it similar to warp-size
 
 #define CHECK_CUDA(call) do {                    \
     cudaError_t e = (call);                      \
@@ -21,17 +20,17 @@ using namespace std;
     }                                               \
 } while(0)
 
-// Matrix Multiplication using tiled sub-matrix.
-// tileA of size [Tile x Tile] will move along column of matrix A and tileB will
-// move along the rows of the matrix B. Since, we have each block of same size as Tile
-// Flops per block = 2 * Tile * Tile * N (each tile output does N multiply&Add operation)
-// Number of global memory read = 2 * Tile * Tile * (N/Tile) = 2 * Tile * N (number of operations per step * number of steps)
-// Arithmetic Intensity = Flops per block / global memory reads = Tile
-// Thus, larger Tile -> more memory efficient but may overcrowd the shared memory.
-__global__ void tiledMatMul(float* a, float* b, float* c) {
+// Matrix Multiplication using tiled sub-matrix for each sub matrix in a batch.
+// Matrix multiplication of A[MxN], B[NxK] to get C[MxK]
+__global__ void tiledMatMul(float* a, float* b, float* c, int batch, int M, int N, int K) {
 
     int x_c = threadIdx.x + blockIdx.x * blockDim.x;  // column index
     int y_r = threadIdx.y + blockIdx.y * blockDim.y;  // row index
+
+    // index offset for each sub-matrix based on their size
+    int batch_Offset_A = batch * M * N;   // For A
+    int batch_Offset_B = batch * N * K;   // For B
+    int batch_Offset_C = batch * M * K;   // For C
 
     // define two 2D sub tile of shape [Tile x Tile] for submatrix A & B
     __shared__ float cachetileA[Tile][Tile + 1]; // added extra padding for safe
@@ -54,14 +53,14 @@ __global__ void tiledMatMul(float* a, float* b, float* c) {
 
         // load the data into shared memory per tileA for matrix A [M x N]
         if(globalx_c < N && y_r < M) {
-            cachetileA[localy_r][localx_c] = a[y_r * N + globalx_c];
+            cachetileA[localy_r][localx_c] = a[batch_Offset_A + y_r * N + globalx_c]; // adding batch offset
         } else {
             cachetileA[localy_r][localx_c] = 0.0f;
         }
 
         // load the data into shared memory per tileB for matrix B [N x K]
         if(x_c < K && globaly_r < N) {
-            cachetileB[localy_r][localx_c] = b[globaly_r * K + x_c];
+            cachetileB[localy_r][localx_c] = b[batch_Offset_B + globaly_r * K + x_c]; // adding batch offset
         } else {
             cachetileB[localy_r][localx_c] = 0.0f;
         }
@@ -75,9 +74,9 @@ __global__ void tiledMatMul(float* a, float* b, float* c) {
         __syncthreads();
     }
 
-    // copy the data per thread into the output matrix C [M x K]
+    // copy the data per thread into the output sub-matrix C [M x K]
     if(x_c < K && y_r < M) {
-        c[y_r * K + x_c] = partialSum;
+        c[batch_Offset_C + y_r * K + x_c] = partialSum; // adding batch offset
     }
 }
 
@@ -89,36 +88,43 @@ int main() {
     CHECK_CUDA(cudaEventCreate(&start));
     CHECK_CUDA(cudaEventCreate(&stop));
 
-    float h_a[M*N], h_b[N*K], h_c[M*K];
+    int M=m;
+    int N=n;
+    int K=k;
+    int B=bch;
+
+    float h_a[B*M*N], h_b[B*N*K], h_c[B*M*K];
     float *d_a, *d_b, *d_c;
 
-    CHECK_CUDA(cudaMalloc(&d_a, M*N*sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_b, N*K*sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_c, M*K*sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_a, B*M*N*sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_b, B*N*K*sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_c, B*M*K*sizeof(float)));
 
     // fill data in host device
-    for(int i=0; i<M*N ;i++) {
+    for(int i=0; i<B*M*N ;i++) {
         h_a[i] = (rand() % 90) * 0.018f;
+        //cout<<"h_a: "<<h_a[i]<<endl;
     }
-    for(int i = 0; i<N*K; i++){
+    for(int i = 0; i<B*N*K; i++){
         h_b[i] = (rand() % 19) * 0.018f;
+        //cout<<"h_b: "<<h_b[i]<<endl;
     }
-
-
-    CHECK_CUDA(cudaMemcpy(d_a, h_a, M*N*sizeof(float), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(d_b, h_b, N*K*sizeof(float), cudaMemcpyHostToDevice));
 
     CHECK_CUDA(cudaEventRecord(start, 0));
 
-    dim3 block(threadsDim, threadsDim);
-    dim3 grid((K+threadsDim-1)/threadsDim, (M+threadsDim-1)/threadsDim);
+    CHECK_CUDA(cudaMemcpy(d_a, h_a, B*M*N*sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(d_b, h_b, B*N*K*sizeof(float), cudaMemcpyHostToDevice));
 
-    tiledMatMul<<<grid, block>>>(d_a, d_b, d_c);
+    dim3 block(Tile, Tile);
+    dim3 grid((K+Tile-1)/Tile, (M+Tile-1)/Tile);
 
-    CHECK_CUDA(cudaGetLastError());
-    CHECK_CUDA(cudaDeviceSynchronize());
+    for(int i=0; i<B; i++) {
+        tiledMatMul<<<grid, block>>>(d_a, d_b, d_c, i, M, N, K);
+        CHECK_CUDA(cudaGetLastError());
+        CHECK_CUDA(cudaDeviceSynchronize());
+    }
 
-    CHECK_CUDA(cudaMemcpy(h_c, d_c, M*K*sizeof(float), cudaMemcpyDeviceToHost));
+    CHECK_CUDA(cudaMemcpy(h_c, d_c, B*M*K*sizeof(float), cudaMemcpyDeviceToHost));
 
     CHECK_CUDA(cudaEventRecord(stop, 0));
     CHECK_CUDA(cudaEventSynchronize(stop));
@@ -126,9 +132,9 @@ int main() {
     float elapsed_time;
     CHECK_CUDA(cudaEventElapsedTime(&elapsed_time, start, stop));
 
-    cout<<"GPU Elapsed time(in ms) : "<< elapsed_time<<endl;  // 0.72  (for 384 compared to simple) //1.76 for all 768
+    cout<<"GPU Elapsed time(in ms) : "<< elapsed_time<<endl;  // 1.56 
 
-    for(int i = 0; i< 50 && i<M*K; i++) {
+    for(int i = 0; i< 30 && i<B*M*K; i++) {
         cout<<"Matrix Multiplication result at col + K*Row:"<<i<<", is: "<<h_c[i]<<endl;
     }
 
