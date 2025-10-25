@@ -6,8 +6,8 @@ using namespace std;
 
 
 #define n 256
-#define m 64    
-#define k 128  
+#define m 64
+#define k 128
 #define bch 32   // batch size
 #define Tile 16  // keep it similar to warp-size
 
@@ -93,6 +93,25 @@ int main() {
     int K=k;
     int B=bch;
 
+    /*
+    Input:
+    B = 2, M = 2, K = 3, N = 2
+    A = [
+         [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+         [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]
+        ]
+    B = [
+         [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]],
+         [[6.0, 5.0], [4.0, 3.0], [2.0, 1.0]]
+        ]
+    Output:
+    Per sub-matrix multiplication : C_b = A_b x B_b
+    C = [
+         [[22.0, 28.0], [49.0, 64.0]],
+         [[92.0, 68.0], [128.0, 95.0]]
+        ]
+    */
+
     float h_a[B*M*N], h_b[B*N*K], h_c[B*M*K];
     float *d_a, *d_b, *d_c;
 
@@ -132,7 +151,7 @@ int main() {
     float elapsed_time;
     CHECK_CUDA(cudaEventElapsedTime(&elapsed_time, start, stop));
 
-    cout<<"GPU Elapsed time(in ms) : "<< elapsed_time<<endl;  // 1.56 
+    cout<<"GPU Elapsed time(in ms) : "<< elapsed_time<<endl;  // 1.56
 
     for(int i = 0; i< 30 && i<B*M*K; i++) {
         cout<<"Matrix Multiplication result at col + K*Row:"<<i<<", is: "<<h_c[i]<<endl;

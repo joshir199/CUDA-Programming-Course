@@ -91,7 +91,7 @@ __global__ void softmaxFunction(float* a, float* c, int M, int N) {
     // Use parallel reduction
     for(int i = blockDim.x/2; i>0; i/=2) {
         if(threadIdx.x < i) {
-            blockMax[threadIdx.x] = fmaxf(blockMax[threadIdx.x], blockMax[threadIdx.x + i])
+            blockMax[threadIdx.x] = fmaxf(blockMax[threadIdx.x], blockMax[threadIdx.x + i]);
         }
         __syncthreads();
     }
@@ -188,10 +188,18 @@ __global__ void matMul(float* a, float* b, float* c, int M, int d, int N, bool s
 
     }
 
-    if(x_c< N & y_r < M) {
-        if(scaled) { // If scaled matrix multiplication as in attention
+    if(scaled) {
+        // To Implement Attention with Linear Biases (ALiBi), following the method described in "Train Short,
+        // Test Long: Attention with Linear Biases Enables Input Length Extrapolation"
+        // Include linear bias in QK_T, QK_T[row][col] = Query[row].Key[col]
+        // linear bias is directly proportional to relative position between query i and key j.
+        // So, linear bias = alpha * (row - col)  => final attention weights = QK_T - linear_bias
+        if(x_c< N & y_r < M) { // If scaled matrix multiplication as in attention
             c[y_r * N + x_c] = partialsum * rsqrtf(d); // 1/sqrt(d) - reciprocal of sqrt
-        } else {
+        }
+
+    } else {
+        if(x_c< N & y_r < M) {
             c[y_r * N + x_c] = partialsum;
         }
     }
