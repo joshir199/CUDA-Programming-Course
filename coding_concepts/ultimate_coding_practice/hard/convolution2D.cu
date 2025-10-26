@@ -154,7 +154,7 @@ int main() {
     cout<<"GPU Elapsed time(in ms) : "<< elapsed_time<<endl;  // 1.66 for all 768
 
     for(int i = 0; i< 50 && i<o_r * o_c; i++) {
-        cout<<"Matrix Multiplication result at col + K*Row:"<<i<<", is: "<<h_c[i]<<endl;
+        cout<<"2D Convolution result at col + K*Row:"<<i<<", is: "<<h_c[i]<<endl;
     }
 
     CHECK_CUDA(cudaFree(d_a));

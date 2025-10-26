@@ -26,32 +26,32 @@ __constant__ float filter[F_len];
 // Here, convolution is only in forward direction without any padding.
 // e.g: C[i] = Sum(x[i+j]*f[j] For j in [0, F_len-1].
 // thus, it will only have right halo.
-__global__ void convolution1DNoPadding(float* input, float* output, int SharedTileSize)
-{
+__global__ void convolution1DNoPadding(float* input, float* output, int SharedTileSize) {
 
-  extern __shared__ float cache[];
-  int tileStart = blockIdx.x * blockDim.x; // starting index for each block
 
-  for(int i = threadIdx.x ; i<SharedTileSize; i += blockDim.x) { // check for shared memory length limit
+    extern __shared__ float cache[];
+    int tileStart = blockIdx.x * blockDim.x; // starting index for each block
 
-    int globalIdx = i + tileStart;
-    if(globalIdx < N) {  // check for input length limit
-      cache[i] = input[globalIdx];
-    } else {
-      cache[i] = 0.0f;
+    for(int i = threadIdx.x ; i<SharedTileSize; i += blockDim.x) { // check for shared memory length limit
+
+        int globalIdx = i + tileStart;
+        if(globalIdx < N) {  // check for input length limit
+          cache[i] = input[globalIdx];
+        } else {
+          cache[i] = 0.0f;
+        }
     }
-  }
-  __syncthreads();
+    __syncthreads();
 
 
-  int outputId = threadIdx.x + tileStart; // get globalId for output array by combining per block result
-  if(outputId < M) {  // check for output length limit
-    float sum = 0.0f;
-    for(int i =0; i<F_len; i++) {
-      sum += filter[i] * cache[i + threadIdx.x];
+    int outputId = threadIdx.x + tileStart; // get globalId for output array by combining per block result
+    if(outputId < M) {  // check for output length limit
+        float sum = 0.0f;
+        for(int i =0; i<F_len; i++) {
+          sum += filter[i] * cache[i + threadIdx.x];
+        }
+        output[outputId] = sum;
     }
-    output[outputId] = sum;
-  }
 }
 
 

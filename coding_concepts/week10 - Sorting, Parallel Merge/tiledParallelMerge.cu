@@ -88,6 +88,7 @@ __global__ void tiledParallelMerge(int* a, int* b, int* c, int M, int N) {
 
     // each block will calculate elementsPerBLock of the output
     // by storing into the shared memory
+    // If Number of Block is given manually and Tile is different than threadsPerBlock
     int elementsPerBLock = (M + N + gridDim.x - 1)/gridDim.x;
 
     __shared__ int cacheA[Tile]; // shared memory for array A
@@ -111,7 +112,7 @@ __global__ void tiledParallelMerge(int* a, int* b, int* c, int M, int N) {
     int sizeA = i_next - i_cur;
     int sizeB = j_next - j_cur;
 
-    // Load elements into the shared memory for processing per block
+    // Load elements cooperatively into the shared memory for processing per block
     for(int i = threadIdx.x; i<sizeA; i+= blockDim.x) {
         cacheA[i] = a[i_cur + i];
     }
