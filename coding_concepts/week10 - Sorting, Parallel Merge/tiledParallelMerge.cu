@@ -91,6 +91,7 @@ __global__ void tiledParallelMerge(int* a, int* b, int* c, int M, int N) {
     // If Number of Block is given manually and Tile is different than threadsPerBlock
     int elementsPerBLock = (M + N + gridDim.x - 1)/gridDim.x;
 
+    // Make sure, elementsPerBLock <= Tile, otherwise it won't fit in cache
     __shared__ int cacheA[Tile]; // shared memory for array A
     __shared__ int cacheB[Tile]; // shared memory for array B
 

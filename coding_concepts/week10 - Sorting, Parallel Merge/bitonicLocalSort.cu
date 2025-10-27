@@ -6,7 +6,7 @@ using namespace std;
 
 
 #define n 999999
-#define threadsPerBlock 1024
+#define threadsPerBlock 256
 
 #define CHECK_CUDA(call) do {                    \
     cudaError_t e = (call);                      \
@@ -30,11 +30,11 @@ __global__ void bitonicSort(int* a, int N) {
     }
     __syncthreads();
 
-    // Bitonic sort proceeds in log₂(N) stages, where each stage doubles
+    // Bitonic sort proceeds in log2(N) stages, where each stage doubles
     // the size of the sorted subsequence.
     // Outer loop : Represents the size of the subsequence currently being merged.
     // It doubles at each iterations
-    for(int i = 2; i< blockDim.x ; i*=2) {
+    for(int i = 2; i<= 2*blockDim.x ; i*=2) {
 
         // Determines whether the current group should be sorted in ascending or descending order.
         // For bitonic sequence, it should be alternating
@@ -47,7 +47,7 @@ __global__ void bitonicSort(int* a, int N) {
             int ixj = threadIdx.x ^ stride;
 
             // compare the elements at these indexes
-            if(ixj > threadIdx.x) {
+            if(ixj<blockDim.x && ixj > threadIdx.x) {
                 // compare and swap for wrong order
                 if((cache[threadIdx.x] > cache[ixj]) == ascending) {
                     int temp = cache[ixj];
