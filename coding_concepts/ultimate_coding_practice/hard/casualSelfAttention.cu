@@ -172,7 +172,7 @@ __global__ void matMul(float* a, float* b, float* c, int M, int d, int N, bool s
         if(x_c< N && y_r < M) {
             //To avoid warp divergence, you can compute the same result branchlessly (to avoid if())
             float condition = (x_c > y_r) ? 1.0f : 0.0f;
-            c[y_r * N + x_c] = condition * MASK_VAL + (1.0f - condition) * partialsum * rsqrtf(d); // 1/sqrt(d) - reciprocal of sqrt
+            c[y_r * N + x_c] = condition * MASK_VAL + (1.0f - condition) * partialsum * rsqrtf((float)d); // 1/sqrt(d) - reciprocal of sqrt
         }
 
     } else {

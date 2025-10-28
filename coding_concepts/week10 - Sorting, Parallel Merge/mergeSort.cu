@@ -35,10 +35,10 @@ __global__ void bitonicSortBlock(float* a, int N) {
 
     // define number of steps as power of 2,  2^n where n starts at 1 and till 2^n == 2 * blockDim.x
     // because, for 2^n == blockDim.x, it will create bitonic sequence rather than sorted block
-    for(int i = 2; i<= 2*blockDim.x; i*=2) {
+    for(int i = 2; i<= blockDim.x; i*=2) {
         // for each size i, half will be ascending and other half will be descending
         // ascending for thread which starts at even multiple of i like 0, 1*i, 2*i, ...
-        bool ascending = ((threadIdx.x / (i/2)) % 2 == 0); // thread which starts at even multiple of 2
+        bool ascending = (((threadIdx.x / i) % 2) == 0); // thread which starts at even multiple of 2
 
         // for each step, we have k number of stages to reorder the elements where 2^k == i.
         for(int stride = i/2; stride>0; stride /= 2) {
