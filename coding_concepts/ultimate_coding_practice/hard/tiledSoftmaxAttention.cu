@@ -194,12 +194,12 @@ __global__ void matMul(float* a, float* b, float* c, int M, int d, int N, bool s
         // Include linear bias in QK_T, QK_T[row][col] = Query[row].Key[col]
         // linear bias is directly proportional to relative position between query i and key j.
         // So, linear bias = alpha * (row - col)  => final attention weights = QK_T - linear_bias
-        if(x_c< N & y_r < M) { // If scaled matrix multiplication as in attention
+        if(x_c< N && y_r < M) { // If scaled matrix multiplication as in attention
             c[y_r * N + x_c] = partialsum * rsqrtf(d); // 1/sqrt(d) - reciprocal of sqrt
         }
 
     } else {
-        if(x_c< N & y_r < M) {
+        if(x_c< N && y_r < M) {
             c[y_r * N + x_c] = partialsum;
         }
     }

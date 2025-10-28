@@ -22,8 +22,10 @@ using namespace std;
     }                                               \
 } while(0)
 
+const float MASK_VAL = -150.0f; // elements are sampled from [-100.0, 100.0]
+const float EPS = 1e-4f;
+
 // softmax function for matrix A[MxN] with casual self-attention inclusion
-// Per Row softmax calculation
 __global__ void softmaxFunction(float* a, float* c, int M, int N) {
 
     extern __shared__ float cache[];  // one dynamic shared memory of size 2*N
@@ -43,7 +45,7 @@ __global__ void softmaxFunction(float* a, float* c, int M, int N) {
     // Stage 1 — Intra-thread reduction (done in your loop)
     //  - Each thread finds the maximum of its chunk(number of elements each process).
     //  - O(N / blockDim.x) time per thread.
-    float localMaxVal = -150.0f; // per thread, all elements are in range [-100.0, 100.0]
+    float localMaxVal = MASK_VAL; // per thread, all elements are in range [-100.0, 100.0]
     for(int i=threadIdx.x; i<N; i+=blockDim.x) {
         localMaxVal = fmaxf(cacheMax[i], localMaxVal);
     }
@@ -72,8 +74,8 @@ __global__ void softmaxFunction(float* a, float* c, int M, int N) {
     // get the exponential of (elements - maxElement per row) for numerical stability
     // each threads loads multiple elements (as N can be 100000)
     for(int i=threadIdx.x; i<N; i+=blockDim.x) {
-        float maskedElement = (a[i + rowOffset] == -150.0f) ? 0.0f : 1.0f;  // set masked element to 0
-        cacheSum[i] = maskedElement * expf(a[i + rowOffset] - blockMax[0]);
+        float val = a[i + rowOffset];
+        cacheSum[i] = (fabsf(val - MASK_VAL) < EPS) ? 0.0f : expf(val - blockMax[0]);  // set masked element to 0
     }
     __syncthreads();
 
@@ -167,15 +169,14 @@ __global__ void matMul(float* a, float* b, float* c, int M, int d, int N, bool s
         // -INFINITY, which in turn becomes 0 during softmax layer.
         // Include casual mask in QK_T, QK_T[row][col] = -INFINITY { row (query) < col (key)
         // and for other cases, it will be as usual
-        if(x_c< N & y_r < M) {
-            float mask = -150.0f;  // elements are sampled from [-100.0, 100.0]
+        if(x_c< N && y_r < M) {
             //To avoid warp divergence, you can compute the same result branchlessly (to avoid if())
             float condition = (x_c > y_r) ? 1.0f : 0.0f;
-            c[y_r * N + x_c] = condition * mask + (1.0f - condition) * partialsum * rsqrtf(d); // 1/sqrt(d) - reciprocal of sqrt
+            c[y_r * N + x_c] = condition * MASK_VAL + (1.0f - condition) * partialsum * rsqrtf(d); // 1/sqrt(d) - reciprocal of sqrt
         }
 
     } else {
-        if(x_c< N & y_r < M) {
+        if(x_c< N && y_r < M) {
             c[y_r * N + x_c] = partialsum;
         }
     }
