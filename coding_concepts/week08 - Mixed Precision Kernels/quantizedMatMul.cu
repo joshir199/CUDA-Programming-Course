@@ -29,14 +29,14 @@ __global__ void quantizedtiledMatMul(const int8_t* a, const int8_t* b, int8_t* c
     int y_r = threadIdx.y + blockIdx.y * blockDim.y;  // row index
 
     // define two 2D sub tile of shape [Tile x Tile] for sub-matrix A & B
-    // Convert to int32_t or float only when multiplying.
-    __shared__ int8_t cachetileA[Tile][Tile + 1]; // added extra padding for safe
-    __shared__ int8_t cachetileB[Tile][Tile + 1]; // added extra padding for safe
+    // Convert to float only when matrix multiplying.
+    __shared__ int32_t cachetileA[Tile][Tile + 1]; // added extra padding for safe
+    __shared__ int32_t cachetileB[Tile][Tile + 1]; // added extra padding for safe
 
     // Now, for each tile we will calculate the partial product sum along common dimension
     int numTiles = (N + Tile - 1)/Tile;
 
-    int32_t partialSum = 0; // matrix multiplication in INT32 precision for accuracy
+    float partialSum = 0; // matrix multiplication in float precision for accuracy
 
     for(int i = 0; i< numTiles; i++) {
 
@@ -50,14 +50,14 @@ __global__ void quantizedtiledMatMul(const int8_t* a, const int8_t* b, int8_t* c
 
         // load the data into shared memory per tileA for matrix A [M x N]
         if(globalx_c < N && y_r < M) {
-            cachetileA[localy_r][localx_c] = a[y_r * N + globalx_c];
+            cachetileA[localy_r][localx_c] = static_cast<int32_t>(a[y_r * N + globalx_c]) - zA;
         } else {
             cachetileA[localy_r][localx_c] = 0;
         }
 
         // load the data into shared memory per tileB for matrix B [N x K]
         if(x_c < K && globaly_r < N) {
-            cachetileB[localy_r][localx_c] = b[globaly_r * K + x_c];
+            cachetileB[localy_r][localx_c] = static_cast<int32_t>(b[globaly_r * K + x_c]) - zB;
         } else {
             cachetileB[localy_r][localx_c] = 0;
         }
@@ -68,7 +68,7 @@ __global__ void quantizedtiledMatMul(const int8_t* a, const int8_t* b, int8_t* c
         // unroll the matrix for element wise multiplication
         for(int j=0; j< Tile; j++) {
             // Accumulate the raw int32 product
-            partialSum += (int32_t(cachetileA[localy_r][j] - zA)  * int32_t(cachetileB[j][localx_c] - zB) );
+            partialSum += (static_cast<float>(cachetileA[localy_r][j])  * static_cast<float>(cachetileB[j][localx_c]) );
         }
         __syncthreads();
     }
@@ -78,10 +78,12 @@ __global__ void quantizedtiledMatMul(const int8_t* a, const int8_t* b, int8_t* c
     if(x_c < K && y_r < M) {
         // This avoids both precision loss and redundant floating-point multiplications inside the loop.
         // scaling in float32
-        float scaled_sum = partialSum * sA * sB / sC;
+        int roundedSum = static_cast<int32_t>(roundf(partialSum));
+        float scaled_sum = static_cast<float>(roundedSum) * sA * sB / sC;
         // clamp(x, a, b) :  clamps the value x into the interval [a, b]
         // finally converting back to INT8 precision
-        int quant = max(-128, min(__float2int_rn(scaled_sum) + zC, 127));
+        int32_t roundedScaledSum = static_cast<int32_t>(roundf(scaled_sum)) + zC;
+        int32_t quant = max(-128, min(roundedScaledSum, 127));
         c[y_r * K + x_c] = static_cast<int8_t>(quant);
     }
 }
