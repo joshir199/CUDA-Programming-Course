@@ -34,11 +34,12 @@ __global__ void bitonicSort(int* a, int N) {
     // the size of the sorted subsequence.
     // Outer loop : Represents the size of the subsequence currently being merged.
     // It doubles at each iterations
-    for(int i = 2; i<= 2*blockDim.x ; i*=2) {
+    // "i<=blockDim.x", here equality sign is very important
+    for(int i = 2; i<= blockDim.x ; i*=2) {
 
         // Determines whether the current group should be sorted in ascending or descending order.
         // For bitonic sequence, it should be alternating
-        bool ascending = ((threadIdx.x & i/2) == 0);
+        bool ascending = (((threadIdx.x / i)%2) == 0);
 
         // Inner loop : Controls how far apart elements are compared and possibly swapped.
         for(int stride = i/2; stride>0; stride /= 2) {
