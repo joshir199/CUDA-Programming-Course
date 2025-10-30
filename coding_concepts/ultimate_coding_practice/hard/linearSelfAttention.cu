@@ -1,7 +1,6 @@
 #include <iostream>
 #include <cstdlib>
 #include <ctime>
-#include <cfloat>
 #include <cuda_runtime.h>
 using namespace std;
 
@@ -109,7 +108,7 @@ __global__ void matMulWithKernelTransform(float* a, float* b, float* c, int M, i
 // ϕ(x) is a function that makes all features non-negative (so it can act like softmax).
 // Example: ϕ(x)=elu(x)+1  = { x + 1; x>0   |  exp(x) + 1 ; x<=0
 // attention(Q,K,V) = ϕ(Q)(ϕ(K_t)V) / ϕ(Q)(ϕ(K_t)1_vec)  ; 1_vec is a vector of ones (for normalization).
-// So, steps to calculate includes:
+// So, steps to calculate linear self-attention includes:
 // 1. MatMul : ϕ(K_t)xV [dxM, Mxd], ϕ(Q)x(result) [Mxd, dxd]
 // 2. MatVecMul : ϕ(K_t)x1_vec [dxM, Mx1], ϕ(Q)x(result) [Mxd, dx1]
 // 3. Row wise division of Numerator with denominator
@@ -159,14 +158,14 @@ int main() {
 
     for(int i=0;i<M;i++) {
         for(int j =0; j<d; j++) {
-            h_q[i*d + j] = (i == j) ? 1.0f : 0.0f;//(rand() + j ) % (99) * 1.0f + 1.0f;
+            h_q[i*d + j] = (rand() + j ) % (99) * 1.0f + 1.0f;
         }
     }
 
     for(int i=0;i<N;i++) {
 
         for(int j =0; j<d; j++) {
-            h_k[i*d + j] = (i == j) ? 1.0f : 0.0f;
+            h_k[i*d + j] = ((rand() + 3)%9)*0.3f;
         }
         h_one[i] = 1.0f;
     }
@@ -190,7 +189,7 @@ int main() {
     transposeMat<<<grid, block>>>(d_k, d_kt, N, d);
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
-    
+
 
     // Step 2
     // For Numerator: Calculate the matrix multiplication of Key transpose with Value = (ϕ(K_T) x V)
@@ -200,7 +199,7 @@ int main() {
     matMulWithKernelTransform<<<grid1, block1>>>(d_kt, d_v, d_ktv, d, M, d);
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
-    
+
 
     // Step 3
     // For Numerator: Calculate the matrix multiplication of Query Matrix with (Key, Value) = ϕ(Q) x (ϕ(K_T) x V)
@@ -210,7 +209,7 @@ int main() {
     matMulWithKernelTransform<<<grid2, block2>>>(d_q, d_ktv, d_qkn, M, d, d);
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
-    
+
 
     // Step 4
     // For Denominator: Calculate Matrix Vector multiplication with vector consisting of ones only.
@@ -218,7 +217,7 @@ int main() {
     matrixVecCalWithTransform<<<1, threadsPerBlock>>>(d_kt, d_one, d_kts, d, M);
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
-    
+
 
 
     // Step 5
@@ -228,7 +227,7 @@ int main() {
     matrixVecCalWithTransform<<<blocksPerGrid, threadsPerBlock>>>(d_q, d_kts, d_qkd, M, d);
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
-    
+
     //float h_test[M];
     //CHECK_CUDA(cudaMemcpy(h_test, d_qkd, M*sizeof(float), cudaMemcpyDeviceToHost));
     //for(int i = 0; i<M; i++) {
