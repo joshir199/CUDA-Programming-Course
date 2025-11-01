@@ -19,31 +19,39 @@ using namespace std;
 
 // Compute multi-agent simulation using the neighbors for each agent
 // to calculate the updated velocity and position
-__global__ void agentSimulation(float* a, float* c, int N, float alpha) {
+__global__ void agentSimulation(float* a, float* c, int N, float area, float alpha) {
 
     int localIdx = blockIdx.x;
 
     int neighborCount = 0;
-    float velocity_x = 0;
-    float velocity_y = 0;
+    float velocity_x = 0.0f;
+    float velocity_y = 0.0f;
 
     // load and get the partial velocities sum per thread
     for(int i = threadIdx.x; i<N; i+=blockDim.x) {
         float dx = a[4*localIdx] - a[4*i];  // x-coordinate
         float dy = a[4*localIdx + 1] - a[4*i + 1];  // y-coordinate
         float dist = (i == localIdx) ? 26.0f : (dx * dx + dy * dy); // when i == j, make it above threshold=25.0
-        if(dist < 25.0f) {
+        if(dist < area) {
             neighborCount += 1;         // get accumulated count per thread
             velocity_x += a[4*i + 2];   // get accumulated velocity x-component per thread
             velocity_y += a[4*i + 3];   // get accumulated velocity y-component per thread
         }
     }
-    __syncthreads();
+
 
     // copy the per thread count, velocity_x and velocity_y into each block array
     __shared__ int blockNeighborCount[threadsPerBlock];
     __shared__ float blockVelXSum[threadsPerBlock];
     __shared__ float blockVelYSum[threadsPerBlock];
+
+    if (threadIdx.x < blockDim.x) {
+        // initialize the shared memory
+        blockNeighborCount[threadIdx.x] = 0;
+        blockVelXSum[threadIdx.x]  = 0.0f;
+        blockVelYSum[threadIdx.x]  = 0.0f;
+    }
+    __syncthreads();
 
     blockNeighborCount[threadIdx.x] = neighborCount;
     blockVelXSum[threadIdx.x] = velocity_x;
@@ -66,8 +74,8 @@ __global__ void agentSimulation(float* a, float* c, int N, float alpha) {
 
         float vx = a[4*localIdx + 2];
         float vy = a[4*localIdx + 3];
-        float vx_avg = (blockNeighborCount[0] > 0) ? blockVelXSum[0]/blockNeighborCount[0] : vx;
-        float vy_avg = (blockNeighborCount[0] > 0) ? blockVelYSum[0]/blockNeighborCount[0] : vy;
+        float vx_avg = (blockNeighborCount[0] > 0) ? blockVelXSum[0]/((float)blockNeighborCount[0]) : vx;
+        float vy_avg = (blockNeighborCount[0] > 0) ? blockVelYSum[0]/((float)blockNeighborCount[0]) : vy;
 
         float vx_new = vx + alpha * (vx_avg - vx);  // update x-velocity
         float vy_new = vy + alpha * (vy_avg - vy);  // update y-velocity
@@ -107,6 +115,7 @@ int main() {
 
     int N = n;
     int alpha = 0.05;
+    float area = 25.0f;     // radius r = 5.0f
 
     float h_a[N*4], h_c[N*4];
     float *d_a, *d_c;
@@ -126,7 +135,7 @@ int main() {
     CHECK_CUDA(cudaEventRecord(start, 0));
 
     int blocksPerGrid = N;
-    agentSimulation<<<blocksPerGrid, threadsPerBlock>>>(d_a, d_c, N, alpha);
+    agentSimulation<<<blocksPerGrid, threadsPerBlock>>>(d_a, d_c, N, area, alpha);
 
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
