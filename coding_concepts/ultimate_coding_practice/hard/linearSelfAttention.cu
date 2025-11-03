@@ -7,7 +7,6 @@ using namespace std;
 
 #define D 512 // common dimension
 #define m 512 // row for Query, Key, Value
-#define threadsPerBlock 512
 #define Tile 16
 
 
@@ -21,7 +20,7 @@ using namespace std;
 } while(0)
 
 // Matrix - Vector multiplication A[d x N] x B [N x 1]  => C[d x 1]
-__global__ void matrixVecCalWithTransform(float* a, float* b, float* c, int d, int N) {
+__global__ void matrixVecCalWithTransformOld(float* a, float* b, float* c, int d, int N) {
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     float partialSum = 0.0f;
 
@@ -40,6 +39,50 @@ __global__ void matrixVecCalWithTransform(float* a, float* b, float* c, int d, i
     }
 
 }
+
+// Get Matrix-Vector multiplication using per block dot product for each row
+// A[M, N], B[N]  => C[M]
+__global__ void matrixVecCalWithTransform(float* a, float* b, float* c, int M, int N) {
+
+    float threadSum = 0.0f;
+
+    // each block stores single row of A[M,N]
+    for(int i = threadIdx.x; i<N; i+= blockDim.x) {
+
+        int gIdx = blockIdx.x * N + i;
+        // use the kernel transform while calculating the key sums per feature
+        float valA = a[gIdx];
+        float sumA = (valA > 0) ? (valA + 1.0f) : (expf(valA));
+        threadSum += sumA * b[i];  // element-wise dot product
+    }
+
+    // initialize the block Sum
+    __shared__ float blockSum[256];
+    if(threadIdx.x < blockDim.x) {
+        blockSum[threadIdx.x] = 0.0f;
+    }
+    __syncthreads();
+
+    // copy the perthread sum
+    blockSum[threadIdx.x] = threadSum;
+    __syncthreads();
+
+    // parallel reduction for sum
+    for(int i=blockDim.x/2; i>0; i/=2) {
+
+        if(threadIdx.x < i) {
+            blockSum[threadIdx.x] += blockSum[threadIdx.x + i];
+        }
+        __syncthreads();
+    }
+
+    // get the per row dot product as final output C[M]
+    if(threadIdx.x == 0) {
+        c[blockIdx.x] = blockSum[0];
+    }
+}
+
+
 
 // calculate matrix transpose for Key Matrix A[Nxd] to get C[dxN]
 __global__ void transposeMat(float* a, float* c, int N, int d) {
@@ -213,8 +256,9 @@ int main() {
 
     // Step 4
     // For Denominator: Calculate Matrix Vector multiplication with vector consisting of ones only.
-    // To calculate : ϕ(K_t) x 1_vec
-    matrixVecCalWithTransform<<<1, threadsPerBlock>>>(d_kt, d_one, d_kts, d, M);
+    // To calculate : ϕ(K_t) x 1_vec  [d, M].[M]
+    int threadsPerBlock = 256;
+    matrixVecCalWithTransform<<<d, threadsPerBlock>>>(d_kt, d_one, d_kts, d, M);
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
 
@@ -222,9 +266,8 @@ int main() {
 
     // Step 5
     // For Denominator: Calculate Matrix Vector multiplication with vector from above.
-    // To calculate : ϕ(Q) x (ϕ(K_t) x 1_vec)
-    int blocksPerGrid = (M + threadsPerBlock - 1)/threadsPerBlock;
-    matrixVecCalWithTransform<<<blocksPerGrid, threadsPerBlock>>>(d_q, d_kts, d_qkd, M, d);
+    // To calculate : ϕ(Q) x (ϕ(K_t) x 1_vec)  [M, d].[d]
+    matrixVecCalWithTransform<<<M, threadsPerBlock>>>(d_q, d_kts, d_qkd, M, d);
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
 
@@ -249,7 +292,7 @@ int main() {
     float elapsed_time;
     CHECK_CUDA(cudaEventElapsedTime(&elapsed_time, start, stop));
 
-    cout<<"ELapsed time(in ms) is "<<elapsed_time<<endl; //1.87
+    cout<<"ELapsed time(in ms) is "<<elapsed_time<<endl; //1.45
 
     for(int i = 0; i< M*d && i<20; i++) {
         cout<<"Query matrix at i:"<<i<<", is "<<h_q[i]<<endl;
@@ -268,7 +311,6 @@ int main() {
     CHECK_CUDA(cudaFree(d_kts));
     CHECK_CUDA(cudaFree(d_qkd));
     CHECK_CUDA(cudaFree(d_qkn));
-    CHECK_CUDA(cudaFree(d_qks));
     CHECK_CUDA(cudaFree(d_one));
     CHECK_CUDA(cudaFree(d_c));
 
