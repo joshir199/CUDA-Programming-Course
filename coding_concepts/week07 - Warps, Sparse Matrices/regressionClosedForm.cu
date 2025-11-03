@@ -84,7 +84,7 @@ __global__ void matMul(float* a, float* b, float* c, int M, int N, int K) {
 // Get Matrix-Vector multiplication using per block dot product for each row
 // A[M, N], B[N]  => C[M]
 __global__ void matVecMul(float* a, float* b, float* c, int M, int N) {
-    int localx = threadIdx.x;
+
     float threadSum = 0.0f;
 
     // each block stores single row of A[M,N]
@@ -121,6 +121,33 @@ __global__ void matVecMul(float* a, float* b, float* c, int M, int N) {
 }
 
 
+// Assuming, diagonal elements are not 0 during this step as given matrix are fully invertible
+__global__ void normalizeDiagonal(float* a, float* c, int pivot, int N) {
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+
+    if(tid < N) {  // process only single pivot row
+        float diag = a[pivot * N + pivot];
+        a[pivot * N + tid] /= diag;
+        c[pivot * N + tid] /= diag;
+    }
+}
+
+
+// Eliminate the other elements along the column of the pivot
+__global__ void eliminateRowKernel(float* a, float* c, int pivot, int N) {
+    int x_c = threadIdx.x + blockIdx.x * blockDim.x;
+    int y_r = threadIdx.y + blockIdx.y * blockDim.y;
+
+    if(x_c < N && y_r < N && (y_r != pivot)) {
+        // factor = R_i[pivot] , e.g: for pivot 0, elements at index 0 for each row is factor
+        float eliminatingFactorPerRow = a[y_r * N + pivot];  // factor for each row at column "pivot"
+        // R_i = R_i - factor * R_pivot
+        a[y_r * N + x_c] -= eliminatingFactorPerRow * a[pivot * N + x_c];
+        c[y_r * N + x_c] -= eliminatingFactorPerRow * c[pivot * N + x_c];
+    }
+}
+
+
 
 int main() {
 
@@ -128,7 +155,10 @@ int main() {
     CHECK_CUDA(cudaEventCreate(&start));
     CHECK_CUDA(cudaEventCreate(&stop));
 
-    float h_a[M*N], h_b[M], h_c[N];
+    int N = n;
+    int M = m;
+
+    float h_a[M*N], h_b[M], h_i[N*N], h_c[N];
     float *d_a, *d_at, *d_ata, *d_inv, *d_d, *d_b, *d_c;
 
     CHECK_CUDA(cudaMalloc(&d_a, M*N*sizeof(float)));
@@ -145,6 +175,11 @@ int main() {
     }
     for(int i = 0; i<M; i++){
         h_b[i] = (rand() % 19) * 0.018f;
+    }
+    for(int i=0; i<N; i++) {
+        for(int j=0; j<N; j++) {
+            h_i[i*N + j] = (i==j) ? 1.0f : 0.0f;
+        }
     }
 
     CHECK_CUDA(cudaMemcpy(d_a, h_a, M*N*sizeof(float), cudaMemcpyHostToDevice));
@@ -166,6 +201,27 @@ int main() {
     CHECK_CUDA(cudaDeviceSynchronize());
 
     // Step 3: matrix inverse = (X_t.X)^-1  => [N, N]
+    // We will use Gaussian Elimination to solve system of linear equations
+    // to get the Inverse of the Matrix. It will start with [A|I], I = Identity Matrix (AA^-1 = I)
+    // We will reduce A to I and I will become A^-1
+    CHECK_CUDA(cudaMemcpy(d_inv, h_i, N*N*sizeof(float), cudaMemcpyHostToDevice));
+    // for normalization
+    int threads = 256;
+    int blocks = (N*N + threads -1)/threads;
+
+    for(int pivot=0; pivot<N; pivot++) {
+
+        // Lets, first normalize the diagonal elements (make it 1) for pivot row
+        normalizeDiagonal<<<blocks, threads>>>(d_ata, d_inv, pivot, N);
+        CHECK_CUDA(cudaGetLastError());
+        CHECK_CUDA(cudaDeviceSynchronize());
+
+        // for row elimination
+        eliminateRowKernel<<<grid2, block>>>(d_ata, d_inv, pivot, N);
+        CHECK_CUDA(cudaGetLastError());
+        CHECK_CUDA(cudaDeviceSynchronize());
+
+    }
 
 
     // Step 4: matrix vector multiplication = X_t.y
@@ -179,7 +235,7 @@ int main() {
 
     // Step 5: Final matrix vector multiplication = [ (X_t.X)^-1 ] [ X_t.y ]
     // A[N, N], B[N] => C[N]
-    int blocksPerGrid1 = M;
+    int blocksPerGrid1 = N;
     matVecMul<<<blocksPerGrid1, threadsPerBlock>>>(d_inv, d_d, d_c, N, N);
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
@@ -192,7 +248,7 @@ int main() {
     float elapsed_time;
     CHECK_CUDA(cudaEventElapsedTime(&elapsed_time, start, stop));
 
-    cout<<"GPU Elapsed time(in ms) : "<< elapsed_time<<endl;  // 0.72  (for 384 compared to simple) //1.76 for all 768
+    cout<<"GPU Elapsed time(in ms) : "<< elapsed_time<<endl;  // 28.37
 
     for(int i = 0; i< 50 && i<N; i++) {
         cout<<"Linear Regression Closed Form trainable parameter result at i:"<<i<<", is: "<<h_c[i]<<endl;
