@@ -44,7 +44,7 @@ void getCSRpointers(int* mat, vector<int> &values, vector<int> &colIndex, vector
 
     for(int i = 0; i<M; i++) {
         for(int j = 0; j<N; j++) {
-            temp = mat[i*M + j];
+            temp = mat[i*N + j];
             if(temp != 0) {
                 values.push_back(temp);
                 colIndex.push_back(j);
@@ -68,9 +68,9 @@ int main() {
     CHECK_CUDA(cudaMalloc(&d_b, N*sizeof(int)));
     CHECK_CUDA(cudaMalloc(&d_c, M*sizeof(int)));
 
-    for(int i=0;i<M;i++) {
-        for(int j =0; j<N; j++) {
-            h_a[i*M + j] = ((i + j)/2) % 2;
+    for(int i=0;i<M;i++) {  // row
+        for(int j =0; j<N; j++) {   //col
+            h_a[i*N + j] = ((i + j)/2) % 2;
         }
     }
 
