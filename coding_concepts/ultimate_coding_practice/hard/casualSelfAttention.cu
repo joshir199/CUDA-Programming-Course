@@ -16,50 +16,40 @@ using namespace std;
 #define CHECK_CUDA(call) do {                    \
     cudaError_t e = (call);                      \
     if(e != cudaSuccess) {                        \
-        cout<<"CUDA Error: "<<cudaGetErrorString(e) \
+        cerr<<"CUDA Error: "<<cudaGetErrorString(e) \
         <<" in "<<__FILE__<<" at "<<__LINE__<<endl; \
         exit(1);                                     \
     }                                               \
 } while(0)
 
-const float MASK_VAL = -150.0f; // elements are sampled from [-100.0, 100.0]
 const float EPS = 1e-4f;
 
 // softmax function for matrix A[MxN] with casual self-attention inclusion
 __global__ void softmaxFunction(float* a, float* c, int M, int N) {
 
-    extern __shared__ float cache[];  // one dynamic shared memory of size 2*N
-    float* cacheMax = cache;  // start at 0-th index of cache array till N-1 index
-    float* cacheSum = &cache[N];  // start at N-th index of cache array till 2N-1 index
+    float cacheMax = -FLT_MAX;
+    extern __shared__ float cacheSum[];
     int rowOffset = blockIdx.x * N; // one row per block
 
     // each threads loads multiple elements (as N can be 100000)
     for(int i=threadIdx.x; i<N; i+=blockDim.x) {
-        cacheMax[i] = a[i + rowOffset];
+        float curVal = a[i + rowOffset];
+        // Get per thread maximum values
+        if(curVal > cacheMax) {
+            cacheMax = curVal;
+        }
     }
-    __syncthreads();
 
-    // reduction to find max
-    // In case where single threads loads multiple elements, each thread is responsible for multiple values
-    // Therefore, we need to apply two-stage reduction strategy
-    // Stage 1 — Intra-thread reduction (done in your loop)
-    //  - Each thread finds the maximum of its chunk(number of elements each process).
-    //  - O(N / blockDim.x) time per thread.
-    float localMaxVal = MASK_VAL; // per thread, all elements are in range [-100.0, 100.0]
-    for(int i=threadIdx.x; i<N; i+=blockDim.x) {
-        localMaxVal = fmaxf(cacheMax[i], localMaxVal);
-    }
-    __syncthreads();
 
     // After getting per thread Max value, we can call stage 2
     // Stage 2 — Inter-thread reduction (could be tree-based)
     //  - Combine blockDim.x local maxima.
     //  - O(log₂(blockDim.x)) time if you use tree-based reduction in shared memory
     __shared__ float blockMax[256];  // threads Per block = 256
-    blockMax[threadIdx.x] = localMaxVal;
+    blockMax[threadIdx.x] = cacheMax;
     __syncthreads();
 
-    // Use parallel reduction
+    // Use parallel reduction to get maximum value per block/Row
     for(int i = blockDim.x/2; i>0; i/=2) {
         if(threadIdx.x < i) {
             blockMax[threadIdx.x] = fmaxf(blockMax[threadIdx.x], blockMax[threadIdx.x + i]);
@@ -73,16 +63,10 @@ __global__ void softmaxFunction(float* a, float* c, int M, int N) {
     // calculate normalised softmax values
     // get the exponential of (elements - maxElement per row) for numerical stability
     // each threads loads multiple elements (as N can be 100000)
-    for(int i=threadIdx.x; i<N; i+=blockDim.x) {
-        float val = a[i + rowOffset];
-        cacheSum[i] = (fabsf(val - MASK_VAL) < EPS) ? 0.0f : expf(val - blockMax[0]);  // set masked element to 0
-    }
-    __syncthreads();
-
-    // Since each thread loads multiple elements, we will apply 2-stage strategy
-    // 1. Intra thread accumulation of values
     float localSum = 0.0f;
     for(int i=threadIdx.x; i<N; i+=blockDim.x) {
+        float val = a[i + rowOffset];
+        cacheSum[i] = (fabsf(val + FLT_MAX) < EPS) ? 0.0f : expf(val - blockMax[0]);  // set masked element to 0
         localSum += cacheSum[i];
     }
     __syncthreads();
@@ -106,7 +90,8 @@ __global__ void softmaxFunction(float* a, float* c, int M, int N) {
     for(int i=threadIdx.x; i<N; i+=blockDim.x) {
        // check for zero to avoid division by zero
        // FLT_EPSILON: it’s the smallest representable float difference.
-       c[i + rowOffset] = cacheSum[i] / fmaxf(blockSum[0], FLT_EPSILON);
+       float perRowSum = fmaxf(blockSum[0], FLT_EPSILON);
+       c[i + rowOffset] = cacheSum[i] / perRowSum;
     }
 }
 
@@ -171,8 +156,8 @@ __global__ void matMul(float* a, float* b, float* c, int M, int d, int N, bool s
         // and for other cases, it will be as usual
         if(x_c< N && y_r < M) {
             //To avoid warp divergence, you can compute the same result branchlessly (to avoid if())
-            float condition = (x_c > y_r) ? 1.0f : 0.0f;
-            c[y_r * N + x_c] = condition * MASK_VAL + (1.0f - condition) * partialsum * rsqrtf((float)d); // 1/sqrt(d) - reciprocal of sqrt
+            float casual_val = (x_c > y_r) ? -FLT_MAX : partialsum * rsqrtf((float)d); // 1/sqrt(d) - reciprocal of sqrt
+            c[y_r * N + x_c] = casual_val;
         }
 
     } else {
