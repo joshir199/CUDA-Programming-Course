@@ -28,7 +28,7 @@ using namespace std;
 
 
 
-// General Max-Pooling 2D with strides and padding
+// General Max-Pooling 2D with strides and padding (Not Zero padding)
 __global__ void maxPooling2d_kernel(float* input, float* output, int H, int W, int K, int pd, int st, int secId)
 {
     int o_r = (H - K + 2*pd )/st + 1;   // output grid size
@@ -51,6 +51,7 @@ __global__ void maxPooling2d_kernel(float* input, float* output, int H, int W, i
     // repeated memory access per output
     for (int i = 0; i < K; i++) {
         for (int j = 0; j < K; j++) {
+            // Since, it is not zero padding, we just ignore padded index (as done in pytorch max-pooling)
             if(gIdx + j < 0 || gIdy + i < 0 || gIdx + j >= W || gIdy + i >= H) { continue;}
 
             int gId = (gIdy + i) * W + (out_x + j) + partOffset;
