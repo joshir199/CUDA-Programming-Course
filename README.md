@@ -1,6 +1,6 @@
 # CUDA Programming Course
-This repository is for learning CUDA Programming on GPU. 
-The repository contains solved examples along with major concepts.
+This repository is for systematic way of learning CUDA Programming on GPU. 
+The repository contains solved examples along with major concepts planned across various weeks.
 
 The whole course has been divided into multiple weeks, each covering major topics in details.
 
@@ -14,6 +14,7 @@ The whole course has been divided into multiple weeks, each covering major topic
 * Week 8 - Warp Concepts, Sparse Matrices
 * Week 9 - CUDA libraries cuBLAS, cuDNN
 * Week 10 - Sorting, Parallel Merge
+* Week 11 - Graph algorithms, BFS, Graph traversal
 
 # For coding CUDA kernels for different problems:
 * ultimate_coding_practice
