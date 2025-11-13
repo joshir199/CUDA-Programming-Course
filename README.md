@@ -21,3 +21,12 @@ The whole course has been divided into multiple weeks, each covering major topic
   * Easy
   * Medium
   * Hard 
+
+# References:
+* Books
+  * "CUDA by Example: An Introduction to General-Purpose GPU Programming" by Jason Sanders and Edward Kandrot
+  * "Programming Massively Parallel Processors" (4th Edition) by Wen-mei Hwu and David Kirk
+* Youtube links:
+  * Onur Mutlu Lectures : ![Programming Heterogeneous Computing Systems with GPUs (Fall 2022)](https://www.youtube.com/watch?v=Yzn8pxq-gtI&list=PL5Q2soXY2Zi8J0QbZ0c9ERLdnFRnO5U8C)
+* Coding Practice Link:
+  * LeetGPU : https://leetgpu.com/
