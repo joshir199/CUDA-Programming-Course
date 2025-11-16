@@ -19,7 +19,37 @@ using namespace std;
 
 
 // Counts the number of elements with the integer value k in an array of 32-bit integers
-__global__ void countElementIn2DArray(int* input, int* output, int K) {
+__global__ void elementCounter2DOptimized(int* input, int* output, int K) {
+
+    int x_c = threadIdx.x + blockIdx.x * blockDim.x;
+    int y_r = threadIdx.y + blockIdx.y * blockDim.y;
+    int localId = threadIdx.y * threadsDim + threadIdx.x;
+
+    extern __shared__ int cache[];  //per block cache shared memory
+    int count = 0; // per thread count
+
+    if(x_c < M && y_r < N) { // global index condition check
+        count = (input[y_r * M + x_c] == K) ? 1 : 0;
+    }
+    cache[localId] = count; // store per thread count in shared memory
+    __syncthreads();
+
+    // parallel reduction to get per block count sum
+    for(int i = threadsDim*threadsDim/2; i>0; i/=2) {
+        if(localId < i) {
+            cache[localId] += cache[localId + i];
+        }
+        __syncthreads();
+    }
+
+    if(threadIdx.x == 0) {
+        atomicAdd(output, cache[0]);  // add all the count from each block at same address
+    }
+}
+
+
+// Counts the number of elements with the integer value k in an array of 32-bit integers
+__global__ void elementCounter2DSimple(int* input, int* output, int K) {
 
     int x_c = threadIdx.x + blockIdx.x * blockDim.x;
     int y_r = threadIdx.y + blockIdx.y * blockDim.y;
@@ -74,8 +104,10 @@ int main() {
 
     dim3 block(threadsDim, threadsDim);
     dim3 grid((M + threadsDim - 1)/threadsDim, (N + threadsDim - 1)/threadsDim);
+    size_t shmem = threadsDim * threadsDim * sizeof(int);
+    elementCounter2DOptimized<<<grid, block, shmem>>>(d_a, d_c, k);
 
-    countElementIn2DArray<<<grid, block>>>(d_a, d_c, k);
+    //elementCounter2DSimple<<<grid, block>>>(d_a, d_c, k);
 
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
@@ -88,7 +120,7 @@ int main() {
     float elapsed_time;
     CHECK_CUDA(cudaEventElapsedTime(&elapsed_time, start, stop));
 
-    cout<<"Elapsed time(in ms) : "<< elapsed_time<<endl;  // 0.46
+    cout<<"Elapsed time(in ms) : "<< elapsed_time<<endl;  // 0.46 for elementCounter2DSimple, 0.41 for elementCounter2DOptimized
 
     cout<<"Count of element k="<<k<<", is: "<<h_c<<endl;  // Count of element k=8, is: 44559
 

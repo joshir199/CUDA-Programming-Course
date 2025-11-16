@@ -7,6 +7,7 @@ using namespace std;
 
 #define N 999999
 #define threadsPerBlock 256
+#define tile 1024
 
 #define CHECK_CUDA(call) do {                    \
     cudaError_t e = (call);                      \
@@ -17,9 +18,43 @@ using namespace std;
     }                                               \
 } while(0)
 
+// Counts the number of elements with the integer value k in an array of 32-bit integers
+__global__ void elementCounterOptimized(int* input, int* output, int K) {
+
+    // per block tile elements processed (thread coarsening)
+    //int tid = threadIdx.x + blockIdx.x * tile;
+
+    extern __shared__ int cache[];
+    int count = 0; // per thread count
+
+    // per thread handles multiple values (tile/256)
+    for(int i=threadIdx.x; i<tile; i+=blockDim.x) {
+        int gid = i + tile * blockIdx.x;
+        if(gid<N) {
+            count += (input[gid] == K) ? 1 : 0;  // all the thread which matches with K will have count value 1;
+        }
+    }
+    cache[threadIdx.x] = count; // store per thread count in shared memory
+    __syncthreads();
+
+    // parallel reduction to get per block count sum
+    for(int i = blockDim.x/2; i>0; i/=2) {
+        if(threadIdx.x < i) {
+            cache[threadIdx.x] += cache[threadIdx.x + i];
+        }
+        __syncthreads();
+    }
+
+    if(threadIdx.x == 0) {
+        atomicAdd(output, cache[0]);  // add all the count from each block at same address
+    }
+
+}
+
+
 
 // Counts the number of elements with the integer value k in an array of 32-bit integers
-__global__ void elementCounter(int* a, int* c, int k) {
+__global__ void elementCounterSimple(int* a, int* c, int k) {
 
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     // So instead of all threads atomically writing to the same global counter (which would
@@ -72,9 +107,11 @@ int main() {
 
     CHECK_CUDA(cudaMemcpy(d_a, h_a, N*sizeof(int), cudaMemcpyHostToDevice));
 
-    int blocksPerGrid = (N + threadsPerBlock - 1)/threadsPerBlock;
-
-    elementCounter<<<blocksPerGrid, threadsPerBlock>>>(d_a, d_c, k);
+    //int blocksPerGrid = (N + threadsPerBlock - 1)/threadsPerBlock;
+    int tileblocksPerGrid = (N + tile - 1)/tile;
+    size_t shmem = threadsPerBlock * sizeof(int);
+    //elementCounterSimple<<<blocksPerGrid, threadsPerBlock>>>(d_a, d_c, k);
+    elementCounterOptimized<<<tileblocksPerGrid, threadsPerBlock, shmem>>>(d_a, d_c, k);
 
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
@@ -87,7 +124,7 @@ int main() {
     float elapsed_time;
     CHECK_CUDA(cudaEventElapsedTime(&elapsed_time, start, stop));
 
-    cout<<"Elapsed time(in ms) : "<< elapsed_time<<endl;  // 0.69
+    cout<<"Elapsed time(in ms) : "<< elapsed_time<<endl;  // 0.69 for elementCounterSimple, 0.37 for elementCounterOptimized
 
 
     cout<<"Count of element k="<<k<<", is: "<<h_c<<endl;  // Count of element k=8, is: 42868
