@@ -9,6 +9,7 @@ using namespace std;
 #define m 768 // With tiling, it can handle the size of 768 for each
 
 #define Tile 16  // same as Block size
+__constant__ float filter[256];
 
 #define CHECK_CUDA(call) do {                    \
     cudaError_t e = (call);                      \
@@ -22,7 +23,7 @@ using namespace std;
 
 // General padded Gaussian Blur convolution : Matrix A[MxN]
 // each block compute Tile x Tile output
-__global__ void gaussianBlurKernel(float* a, float* b, float* c, int M, int N, int k_r, int k_c) {
+__global__ void gaussianBlurKernel(float* a, float* c, int M, int N, int k_r, int k_c) {
 
     extern __shared__ float cache[];   // shared memory to stored all the required inputs for [Tile x Tile] output
 
@@ -58,14 +59,12 @@ __global__ void gaussianBlurKernel(float* a, float* b, float* c, int M, int N, i
         for(int i = 0; i< k_r; i++) {
             for(int j = 0; j < k_c; j++) {
 
-                sum += cache[(threadIdx.y + i) * sharedWidth + (threadIdx.x + j)] * b[i * k_c + j];
+                sum += cache[(threadIdx.y + i) * sharedWidth + (threadIdx.x + j)] * filter[i * k_c + j];
             }
         }
 
         c[outy_r * N + outx_c] = sum;
-
     }
-
 }
 
 
@@ -78,15 +77,14 @@ int main() {
 
     int M = m;
     int N = n;
-    int K_R = 21;  // maximum kernel size 17 x 17
-    int K_C = 21;  // maximum kernel size 17 x 17
+    int K_R = 15;  // maximum kernel size 16 x 16
+    int K_C = 15;  // maximum kernel size 16 x 16
 
 
     float h_a[M*N], h_b[K_R*K_C], h_c[M*N];
-    float *d_a, *d_b, *d_c;
+    float *d_a, *d_c;
 
     CHECK_CUDA(cudaMalloc(&d_a, M*N*sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_b, K_R*K_C*sizeof(float)));
     CHECK_CUDA(cudaMalloc(&d_c, M*N*sizeof(float)));
 
     // fill data in host device
@@ -94,14 +92,14 @@ int main() {
         h_a[i] = (rand() % 90) * 0.018f;
         //cout<<"h_a: "<<h_a[i]<<endl;
     }
-    for(int i = 0; i<K_R*K_C; i++){
+    for(int i = 0; i<256; i++){
         h_b[i] = (rand() % 19) * 0.018f;
         //cout<<"h_b: "<<h_b[i]<<endl;
     }
 
 
     CHECK_CUDA(cudaMemcpy(d_a, h_a, M*N*sizeof(float), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(d_b, h_b, K_R*K_C*sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpyToSymbol(filter, h_b, 256*sizeof(float)));
 
     CHECK_CUDA(cudaEventRecord(start, 0));
 
@@ -110,7 +108,7 @@ int main() {
     dim3 block(Tile, Tile);
     dim3 grid((N + Tile-1)/Tile, (M + Tile-1)/Tile);  // per block [Tile x Tile] output
     size_t shmem = (threadsDimx) * (threadsDimy) * sizeof(float);  // for output size of Tile x Tile
-    gaussianBlurKernel<<<grid, block, shmem>>>(d_a, d_b, d_c, M, N, K_R, K_C);
+    gaussianBlurKernel<<<grid, block, shmem>>>(d_a, d_c, M, N, K_R, K_C);
 
 
     CHECK_CUDA(cudaGetLastError());
@@ -124,14 +122,13 @@ int main() {
     float elapsed_time;
     CHECK_CUDA(cudaEventElapsedTime(&elapsed_time, start, stop));
 
-    cout<<"GPU Elapsed time(in ms) : "<< elapsed_time<<endl;  // 1.32 for all 768
+    cout<<"GPU Elapsed time(in ms) : "<< elapsed_time<<endl;  // 0.94 for all 768
 
     for(int i = 0; i< 30 && i<M*N; i++) {
         cout<<"Gaussian Blur result at col + K*Row:"<<i<<", is: "<<h_c[i]<<endl;
     }
 
     CHECK_CUDA(cudaFree(d_a));
-    CHECK_CUDA(cudaFree(d_b));
     CHECK_CUDA(cudaFree(d_c));
     CHECK_CUDA(cudaEventDestroy(start));
     CHECK_CUDA(cudaEventDestroy(stop));
