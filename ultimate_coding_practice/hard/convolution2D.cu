@@ -12,6 +12,8 @@ using namespace std;
 
 #define Tile 16  // same as Block size
 
+__constant__ float filter[256];
+
 #define CHECK_CUDA(call) do {                    \
     cudaError_t e = (call);                      \
     if(e != cudaSuccess) {                        \
@@ -68,7 +70,7 @@ __global__ void convolution2DKernel(float* a, float* b, float* c, int M, int N, 
 
 
 // Basic Non-padded 2D convolution
-__global__ void conv2d_kernel(float* input, float* kernel, float* output, int input_rows, int input_cols, int k_rows, int k_cols)
+__global__ void conv2d_kernel(float* input, float* output, int input_rows, int input_cols, int k_rows, int k_cols)
 {
     // valid output size
     int out_rows = input_rows - k_rows + 1;
@@ -86,8 +88,7 @@ __global__ void conv2d_kernel(float* input, float* kernel, float* output, int in
     for (int i = 0; i < k_rows; i++) {
         for (int j = 0; j < k_cols; j++) {
             float a = input[(out_y + i) * input_cols + (out_x + j)];
-            float b = kernel[i * k_cols + j];
-            val += a * b;
+            val += a * filter[i * k_cols + j];
         }
     }
     output[out_y * out_cols + out_x] = val;
@@ -102,16 +103,15 @@ int main() {
 
     int M = m;
     int N = n;
-    int K_R = 28;  // maximum kernel size 31 x 31
-    int K_C = 30;  // maximum kernel size 31 x 31
+    int K_R = 16;  // maximum kernel size 16 x 16
+    int K_C = 16;  // maximum kernel size 16 x 16
     int o_r = M - K_R + 1;
     int o_c = N - K_C + 1;
 
     float h_a[M*N], h_b[K_R*K_C], h_c[o_r * o_c];
-    float *d_a, *d_b, *d_c;
+    float *d_a, *d_c;
 
     CHECK_CUDA(cudaMalloc(&d_a, M*N*sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_b, K_R*K_C*sizeof(float)));
     CHECK_CUDA(cudaMalloc(&d_c, o_r * o_c*sizeof(float)));
 
     // fill data in host device
@@ -119,26 +119,26 @@ int main() {
         h_a[i] = i*1.0f;//(rand() % 90) * 0.018f;
         //cout<<"h_a: "<<h_a[i]<<endl;
     }
-    for(int i = 0; i<K_R*K_C; i++){
+    for(int i = 0; i<256; i++){
         h_b[i] = ((i + 2)%2)*1.0f; //(rand() % 19) * 0.018f;
         //cout<<"h_b: "<<h_b[i]<<endl;
     }
 
 
     CHECK_CUDA(cudaMemcpy(d_a, h_a, M*N*sizeof(float), cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(d_b, h_b, K_R*K_C*sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpyToSymbol(filter, h_b, 256*sizeof(float)));
 
     CHECK_CUDA(cudaEventRecord(start, 0));
 
-    dim3 block(threadsDim, threadsDim);
-    dim3 grid((N + threadsDim-1)/threadsDim, (M + threadsDim-1)/threadsDim);
-    size_t shmem = (Tile + K_R - 1) * (Tile + K_C - 1) * sizeof(float);  // for output size of Tile x Tile
-    convolution2DKernel<<<grid, block, shmem>>>(d_a, d_b, d_c, M, N, K_R, K_C);
+    //dim3 block(threadsDim, threadsDim);
+    //dim3 grid((N + threadsDim-1)/threadsDim, (M + threadsDim-1)/threadsDim);
+    //size_t shmem = (Tile + K_R - 1) * (Tile + K_C - 1) * sizeof(float);  // for output size of Tile x Tile
+    //convolution2DKernel<<<grid, block, shmem>>>(d_a, d_c, M, N, K_R, K_C);
 
-    // For basic 2D convolution (without shared memory)
-    // dim3 block(threadsDim, threadsDim);
-    // dim3 grid((o_c + threadsDim-1)/threadsDim, (o_r + threadsDim-1)/threadsDim);
-    // conv2d_kernel<<<grid, block>>>(d_a, d_b, d_c, M, N, K_R, K_C);
+    //For basic 2D convolution (without shared memory)
+    dim3 block(threadsDim, threadsDim);
+    dim3 grid((o_c + threadsDim-1)/threadsDim, (o_r + threadsDim-1)/threadsDim);
+    conv2d_kernel<<<grid, block>>>(d_a, d_c, M, N, K_R, K_C);
 
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
@@ -151,14 +151,13 @@ int main() {
     float elapsed_time;
     CHECK_CUDA(cudaEventElapsedTime(&elapsed_time, start, stop));
 
-    cout<<"GPU Elapsed time(in ms) : "<< elapsed_time<<endl;  // 1.66 for all 768
+    cout<<"GPU Elapsed time(in ms) : "<< elapsed_time<<endl;  // 0.98 for all 768
 
     for(int i = 0; i< 50 && i<o_r * o_c; i++) {
         cout<<"2D Convolution result at col + K*Row:"<<i<<", is: "<<h_c[i]<<endl;
     }
 
     CHECK_CUDA(cudaFree(d_a));
-    CHECK_CUDA(cudaFree(d_b));
     CHECK_CUDA(cudaFree(d_c));
     CHECK_CUDA(cudaEventDestroy(start));
     CHECK_CUDA(cudaEventDestroy(stop));
