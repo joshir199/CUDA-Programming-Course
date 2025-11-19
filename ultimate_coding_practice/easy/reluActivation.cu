@@ -27,7 +27,8 @@ __global__ void reluActivation(float* a, float* c) {
     float alpha = 0.01f;  // set alpha in range of [0, 1]
 
     if(tid<N) {
-        c[tid] = fmaxf(a[tid], alpha * a[tid]); // store values per thread
+        float value = a[tid];
+        c[tid] = fmaxf(value, alpha * value); // store values per thread
     }
 }
 

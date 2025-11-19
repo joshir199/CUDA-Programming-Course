@@ -24,7 +24,8 @@ __global__ void siluActivation(float* a, float* c) {
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
 
     if(tid<N) {
-        c[tid] = a[tid] / (1.0f + expf(-1.0f * a[tid])); // store values per thread
+        float value = a[tid];
+        c[tid] = value / (1.0f + expf(-value)); // store values per thread
     }
 }
 
