@@ -2,6 +2,10 @@
 This repository is for systematic way of learning CUDA Programming on GPU. 
 The repository contains solved examples along with major concepts planned across various weeks.
 
+![Memory hierarchy of a GPU](https://github.com/joshir199/CUDA-Programming-Course/blob/main/week01%20-%20CUDA%20Intro%2C%20Threads%2C%20Blocks/architecture_diagram.png)
+ Figure : Memory hierarchy of a GPU
+
+     
 The whole course has been divided into multiple weeks, each covering important topics in details. 
 
 * For beginners, I recommend to start with book "CUDA by Example" mentioned below and practice the coding questions along.
