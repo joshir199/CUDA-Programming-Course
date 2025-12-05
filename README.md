@@ -15,7 +15,7 @@ The whole course has been divided into multiple weeks, each covering important t
 * Week 9 - CUDA libraries cuBLAS, cuDNN
 * Week 10 - Sorting, Parallel Merge
 * Week 11 - Graph algorithms, BFS, Graph traversal
-* Week 12 - week12 - Advanced Optimization methods, Memory-Compute Analysis
+* Week 12 - Advanced Optimization methods, Memory-Compute Analysis
 
 # For coding CUDA kernels for different problems:
 * ultimate_coding_practice
