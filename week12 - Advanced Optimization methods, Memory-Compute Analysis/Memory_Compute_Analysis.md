@@ -50,7 +50,16 @@ Total Computation: TILE_WIDTH x TILE_WIDTH x TILE_WIDTH x (1 Mul + 1 Add Ops) = 
 
 <b>Computational Intensity per tile = Total Compute (FLOP) / Total global loads per tile (B) = TILE_WIDTH/4 </b>
 
-For example, if TILE_WIDTH = 16, Computational Intensity = 4 FLOP/B, which is 16 times higher than previous 0.25 FLOP/B. This improvement allows the device to achieve (1555 GB/second)*(4 OP/B)=6220 GFLOPS throughput which is now 32% os the peak throughput. Thus, tiling converts a memory-bound kernel into a much more compute-heavy kernel.
+For example, if TILE_WIDTH = 16, Computational Intensity = 4 FLOP/B, which is 16 times higher than previous 0.25 FLOP/B. This improvement allows the device to achieve <b>(1555 GB/second)*(4 OP/B)=6220 GFLOPS throughput which is now 32% os the peak throughput.</b> Thus, tiling converts a memory-bound kernel into a much more compute-heavy kernel.
+
+### Limitations to improve computational intensity by just increasing TILE_WIDTH
+The very resources that increase computational intensity (registers and shared memory) reduce occupancy if overused because occupancy is limited by per-thread and per-block resource usage. As we know that SM has finite Registers, Shared memory, Thread slots and Blocks per SM, for example <b>fixed shared memory size (48KB for RTX A4000, 164KB for A100).</b> If you want all thread slots occupied, the average shared memory per thread must be 164KB/2048 = 82B per thread for A100.
+
+In tiled MatMul, While Tile size is limited by Shared Memory size per SM, It does not hinder the kernel occupancy. Threads per block is TILE_WIDTH² and shared memory usage per block is 8 * TILE_WIDTH² B. Therefore, <b>average shared memory usage per thread is 8B/thread (<< 82B).</b>
+
+In counter example, if 256 threads in a block uses 32KB shared memory, then per thread usage is 132B (>82B). With such shared memory usage, the kernel cannot achieve full occupancy. Each SM can host a maximum of only (164 KB)/(132 B/thread)-1272 threads to avoid exceedng the limit. Therefore the <b>maximum achievable occupancy of this kernel will be (1272 assigned threads)/(2048 maximum threads)-62%.</b>
+
+Therefore, Increasing data reuse does not automatically increase performance if it destroys occupancy. Thus, maximum occupancy is not always optimal.
 
 
   
