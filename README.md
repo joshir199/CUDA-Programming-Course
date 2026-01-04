@@ -1,18 +1,44 @@
 # CUDA Programming Course
-This repository is for systematic way of learning CUDA Programming on GPU. 
+This repository is built for systematic learning of CUDA Programming for beginner/intermediate. 
+   
+CUDA (Compute Unified Device Architecture) is NVIDIA’s platform for parallel computing on GPUs. CUDA is particularly relevant for AI because it enables massive parallelization for tasks like neural network training, inference, and data processing, which are computationally intensive.
+
+
 The repository contains solved examples along with major concepts planned across various weeks.
+<div align="center">
+    <img src="https://github.com/joshir199/CUDA-Programming-Course/blob/main/week01%20-%20CUDA%20Intro%2C%20Threads%2C%20Blocks/architecture_diagram.png" alt="Memory hierarchy of a GPU">
+    <p><i>Figure: Memory hierarchy of a GPU</i></p>
+</div>
 
-![Memory hierarchy of a GPU](https://github.com/joshir199/CUDA-Programming-Course/blob/main/week01%20-%20CUDA%20Intro%2C%20Threads%2C%20Blocks/architecture_diagram.png)
- Figure : Memory hierarchy of a GPU
 
+Key concepts about CUDA architecture:
+   
+<b>Streaming Multiprocessors (SMs)</b> : SMs are the core processing units in a GPU, each containing CUDA cores, registers, and shared memory. Example: An NVIDIA RTX 3080 has 68 SMs with 128 CUDA cores per SM.
+  
+<b>CUDA Cores</b> : These are the basic processing units for parallel computation. More CUDA cores generally mean higher parallel throughput.
+
+<b>Memory Hierarchy</b>:
+* Global Memory: Large but slow, accessible by all threads (e.g., 16 GB on RTX A4000).
+* Shared Memory: Fast, on-chip memory shared within a thread block (e.g., 48 KB per SM on RTX A4000).
+* Registers: Fastest, private to each thread.
+* Constant/Texture Memory: Specialized for specific use cases (e.g., read-only data, max 10KB for constant memory on RTX A4000).
+
+_________________________________________________________________________________________________________
      
 The whole course has been divided into multiple weeks, each covering important topics in details. 
 
 * For beginners, I recommend to start with book "CUDA by Example" mentioned below and practice the coding questions along.
 * For intermediate and above, start with coding practices and learn important concepts from book "Programming Massively Parallel Processors" and lecture videos mentioned in reference section.
+* Concepts & Notes for each week are added within each week's folder
 
-## [TODO]
-* Notes for each week will be added soon....
+### Prerequisites
+* Hardware: Ensure you have access to an NVIDIA GPU
+* Software: Install the CUDA Toolkit and a compatible NVIDIA driver. Use an IDE like for C/C++ coding.
+
+
+
+
+
 *************************************************
 # Following are the weekly topic covered in this course:
 * Week 1 - CUDA Intro, Threads, Blocks
