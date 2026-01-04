@@ -44,7 +44,7 @@ The whole course has been divided into multiple weeks, each covering important t
 * Week 1 - CUDA Intro, Threads, Blocks
 * Week 2 - Grids, Shared Memory, Reduction Pattern
 * Week 3 - 2D Block, Grids, Matrices
-* Week 5 - Atomics Operations
+* Week 5 - Atomics Operations, Privatisation
 * Week 6 - Streams, Integrated Memory
 * Week 7 - Advanced Tiling, Threads Collaboration
 * Week 8 - Warp Concepts, Sparse Matrices
