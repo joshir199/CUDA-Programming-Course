@@ -56,9 +56,9 @@ The whole course has been divided into multiple weeks, each covering important t
 *********************************************
 # For coding CUDA kernels for different problems:
 * ultimate_coding_practice
-  * Easy
-  * Medium
-  * Hard 
+  * <b>Easy</b> (such as Vector Addition, Matrix transpose, ReLU, Count Array Element etc.)
+  * <b>Medium</b> (Dot Product, 1D Convolution, Prefix Sum, Histogram Binning, Mean Squared Error, Max Pooling, Matrix Multiplication etc.)
+  * <b>Hard</b>  (Softmax, Attention, 2D Convolution, Batch Normalisation, K-Means Clustering, Multi-head Attention, Gaussian Blur etc.)
 
 **********************************************
 # References:
