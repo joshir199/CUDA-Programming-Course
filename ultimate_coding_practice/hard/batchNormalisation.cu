@@ -45,22 +45,15 @@ __global__ void matrix_transpose_kernel(float* input, float* output, int rows, i
 // get Mean for each feature row (C) per block for matrix A[CxN]
 __global__ void perFeatureMean(float* a, float* b, int N, int C) {
 
-    extern __shared__ float cache[];
+    // Per thread sum for each block
+    int localSum = 0.0f;
 
     // load each elements per C per row into per block
     // Per thread loads multiple elements cooperatively
     for(int i = threadIdx.x; i< N; i+=blockDim.x) {
         int gIdx = blockIdx.x * N + i;
-        cache[i] = a[gIdx];
+        localSum += a[gIdx];
     }
-    __syncthreads();
-
-    // Per thread sum for each block
-    int localSum = 0.0f;
-    for(int i = threadIdx.x; i< N; i+=blockDim.x) {
-        localSum += cache[i];
-    }
-    __syncthreads();
 
     __shared__ float blockCache[256];  // threads Per block = 256
     blockCache[threadIdx.x] = localSum;
@@ -83,22 +76,15 @@ __global__ void perFeatureMean(float* a, float* b, int N, int C) {
 // get Variance for each feature row (C) per block for matrix A[CxN]
 __global__ void perFeatureVariance(float* a, float* b, float* c, int N, int C) {
 
-    extern __shared__ float cache[];
+    // Per thread sum for each block
+    int localSum = 0.0f;
 
     // load each elements per C per row into per block
     // Per thread loads multiple elements cooperatively
     for(int i = threadIdx.x; i< N; i+=blockDim.x) {
         int gIdx = blockIdx.x * N + i;
-        cache[i] = (a[gIdx] - b[blockIdx.x]) *  (a[gIdx] - b[blockIdx.x]);
+        localSum += (a[gIdx] - b[blockIdx.x]) *  (a[gIdx] - b[blockIdx.x]);
     }
-    __syncthreads();
-
-    // Per thread sum for each block
-    int localSum = 0.0f;
-    for(int i = threadIdx.x; i< N; i+=blockDim.x) {
-        localSum += cache[i];
-    }
-    __syncthreads();
 
     __shared__ float blockCache[256];  // threads Per block = 256
     blockCache[threadIdx.x] = localSum;
@@ -178,13 +164,12 @@ int main() {
     // After transpose, we will use A_T for Mean & Variance calculation
     int blocksPerGrid = C; // each feature row as separate block (C<= 1024)
     int threadsPerBlock = 256;
-    size_t shmem = N * sizeof(float);  // N elements per block
-    perFeatureMean<<<blocksPerGrid, threadsPerBlock, shmem>>>(d_at, d_b, N, C);
+    perFeatureMean<<<blocksPerGrid, threadsPerBlock>>>(d_at, d_b, N, C);
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
 
     // Similar setup for Variance calculation
-    perFeatureVariance<<<blocksPerGrid, threadsPerBlock, shmem>>>(d_at, d_b, d_c, N, C);
+    perFeatureVariance<<<blocksPerGrid, threadsPerBlock>>>(d_at, d_b, d_c, N, C);
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
 
@@ -204,7 +189,7 @@ int main() {
     float elapsed_time = 0.0f;
     CHECK_CUDA(cudaEventElapsedTime(&elapsed_time, start, stop));
 
-    cout<<"Elapsed time(in ms) is "<<elapsed_time<<endl;  // 1.87
+    cout<<"Elapsed time(in ms) is "<<elapsed_time<<endl;  // 1.82
 
     for(int i = 0; i<N*C && i<20; i++) {
         cout<<"Batch Normalised Value is : "<<h_d[i]<<", original element: "<<h_a[i]<<endl;
