@@ -110,7 +110,7 @@ int main() {
     cout<<"Elapsed time(in ms) : "<< elapsed_time<<endl;  // 2.06  (faster than Odd-Even)
 
     for(int i = 0; i< 50 && i<N; i++) {
-        cout<<"Odd-Even sorting result at i:"<<i<<", is: "<<h_c[i]<<", original array: "<<h_a[i]<<endl;
+        cout<<"Bitonic local sorting result at i:"<<i<<", is: "<<h_c[i]<<", original array: "<<h_a[i]<<endl;
     }
 
     CHECK_CUDA(cudaFree(d_a));
