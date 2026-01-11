@@ -3,12 +3,13 @@
 #include <ctime>
 #include <cfloat>
 #include <cuda_runtime.h>
+#include <curand_kernel.h>
 using namespace std;
 
 
 #define n 999
 #define threadsPerBlock 256
-#define threadCoarse 2048
+#define threadCoarse 512
 
 #define CHECK_CUDA(call) do {                    \
     cudaError_t e = (call);                      \
@@ -19,6 +20,19 @@ using namespace std;
     }                                               \
 } while(0)
 
+
+__global__ void getSamplingProbability(int seed, float* p) {
+    if(threadIdx.x == 0) {  // single thread operation
+        curandState state;
+        curand_init(seed, 0, 0, &state);
+
+        float r = curand_uniform(&state);     // r in (0, 1]
+        if(r == 1.0f) {
+            r = 0.999999f;
+        }
+        *p = r;
+    }
+}
 
 __global__ void softmaxFunction(float* a, float maxVal, float* totalSum, int N) {
 
@@ -52,7 +66,7 @@ __global__ void softmaxFunction(float* a, float maxVal, float* totalSum, int N) 
     // into single variable (variable should be global rather than local
     // thread because it will reset to zero every iterations)
     if(threadIdx.x == 0) {
-        atomicAddFloat(totalSum, cache[0]); //use Max function for float values
+        atomicAdd(totalSum, cache[0]); //use Max function for float values
     }
 }
 
@@ -60,7 +74,7 @@ __global__ void softmaxFunction(float* a, float maxVal, float* totalSum, int N) 
 // descending order
 // Num of threads per block = 256 (power of 2 only)
 // Keep track of indexes while sorting.
-// Sorting must preserve the mapping from sorted values → original indices.
+// Sorting must preserve the mapping from sorted values ? original indices.
 // This is called key–value sorting.
 __global__ void bitonicSort(float* data, int* indexArr, int N) {
 
@@ -69,7 +83,7 @@ __global__ void bitonicSort(float* data, int* indexArr, int N) {
     __shared__ int cacheInd[256];
     if(tid<N) {
         cache[threadIdx.x] = data[tid];
-        cacheInd[threadIdx.x] = tid;
+        cacheInd[threadIdx.x] = indexArr[tid];
     } else {
         cache[threadIdx.x] = -FLT_MAX;
         cacheInd[threadIdx.x] = -1;
@@ -155,10 +169,10 @@ int main() {
     CHECK_CUDA(cudaEventCreate(&stop));
 
     int N = n;
-    float p = 0.75;
+    float p = 0.85f;
     float h_a[N], h_c[N], totalSum;
     float *d_a, *d_c, *ts;
-    int h_aInd[N], h_cInd[N];
+    int h_aInd[N], h_cInd[N], seed;
     int *d_aInd, *d_cInd;
 
     CHECK_CUDA(cudaMalloc(&d_a, N*sizeof(float)));
@@ -169,9 +183,13 @@ int main() {
 
     // fill data in host device
     for(int i=0; i<N ;i++) {
-        h_a[i] = (rand() % 999) * 1.0f;
+        h_a[i] = (rand() % 29) * 0.01f;
         h_aInd[i] = i;
     }
+    totalSum = 0.0f;
+    seed = 33;
+
+    cout<<totalSum<<endl;
 
     CHECK_CUDA(cudaEventRecord(start, 0));
 
@@ -187,6 +205,7 @@ int main() {
 
     CHECK_CUDA(cudaMemcpy(d_c, d_a, N*sizeof(float), cudaMemcpyDeviceToDevice));
     CHECK_CUDA(cudaMemcpy(d_cInd, d_aInd, N*sizeof(int), cudaMemcpyDeviceToDevice));
+
 
     // Step 3: progressive merging
     // Start with segment width = threads (size that was sorted per block)
@@ -208,11 +227,11 @@ int main() {
 
             // Launch simple merge kernel for this pair (single-thread)
             mergeKernel_singleThread<<<1, 1>>>(A_ptr, A_ind_ptr, sizeA, B_ptr, B_ind_ptr, sizeB, C_ptr, C_ind_ptr);
-            cudaDeviceSynchronize();
+            CHECK_CUDA(cudaDeviceSynchronize());
 
             // Copy merged output back to 'data' so next merges read latest values
-            cudaMemcpy(d_c + start, d_a + start, (sizeA + sizeB) * sizeof(float), cudaMemcpyDeviceToDevice);
-            cudaMemcpy(d_cInd + start, d_aInd + start, (sizeA + sizeB) * sizeof(int), cudaMemcpyDeviceToDevice);
+            CHECK_CUDA(cudaMemcpy(d_c + start, d_a + start, (sizeA + sizeB) * sizeof(float), cudaMemcpyDeviceToDevice));
+            CHECK_CUDA(cudaMemcpy(d_cInd + start, d_aInd + start, (sizeA + sizeB) * sizeof(int), cudaMemcpyDeviceToDevice));
         }
         width *= 2;
     }
@@ -222,27 +241,62 @@ int main() {
     CHECK_CUDA(cudaMemcpy(h_c, d_c, N*sizeof(float), cudaMemcpyDeviceToHost));
     CHECK_CUDA(cudaMemcpy(h_cInd, d_cInd, N*sizeof(int), cudaMemcpyDeviceToHost));
 
-    /*
+    for(int i = 0; i< 30 && i<N; i++) {
+        cout<<" First Bitonic sorting result at i:"<<i<<", is: "<<h_c[i]<<endl;
+    }
+
     float maxLogitValue = h_c[0];
-    CHECK_CUDA(cudaMemset(ts, 0, 1*sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemset(ts, 0, 1*sizeof(float)));
     softmaxFunction<<<blocksPerGrid, threadsPerBlock>>>(d_c, maxLogitValue, ts, N);
+    CHECK_CUDA(cudaDeviceSynchronize());
 
     CHECK_CUDA(cudaMemcpy(h_c, d_c, N*sizeof(float), cudaMemcpyDeviceToHost));
     CHECK_CUDA(cudaMemcpy(&totalSum, ts, sizeof(float), cudaMemcpyDeviceToHost));
 
+    cout<<" sum value: "<<totalSum<<endl;
+
+    // get the largest index whose sum is greater than p
     int index = 0;
+    float nucleusSum = 0.0f;
     while(index<N) {
-        float prob = h_c[i]/totalSum;
+        h_c[index] /= totalSum;    // convert it into probabilities
+        float prob = h_c[index];
         if(p - prob <0) {
             break;
         } else {
             p -= prob;
+            nucleusSum += prob;
             index++;
         }
     }
-    */
 
+    cout<<" nucleus set length: "<<index<<endl;
     // after getting sorted (descending order)
+    // Convert filtered set of size index to probabilities (no need for softmax now)
+    // Get the new random nucleus probability (p_new) using the seed value
+    getSamplingProbability<<<1, 1>>>(seed, ts);
+    CHECK_CUDA(cudaDeviceSynchronize());
+
+    float p_new;
+    CHECK_CUDA(cudaMemcpy(&p_new, ts, sizeof(float), cudaMemcpyDeviceToHost));
+
+    cout<<"p_new: "<<p_new<<endl;
+    // get the largest index whose sum is greater than p_new
+    int id = 0;
+    while(id<index) {
+        float prob = h_c[id]/nucleusSum;
+        if(p_new - prob <0) {
+            break;
+        } else {
+            p_new -= prob;
+            id++;
+        }
+    }
+    cout<<"id: "<<id - 1<<endl;
+
+    int selectedId = id > 0 ? h_cInd[id - 1] : 0;
+
+    cout<<"Selected sample Id: "<<selectedId<<endl;
 
     CHECK_CUDA(cudaEventRecord(stop, 0));
     CHECK_CUDA(cudaEventSynchronize(stop));
@@ -250,13 +304,17 @@ int main() {
     float elapsed_time;
     CHECK_CUDA(cudaEventElapsedTime(&elapsed_time, start, stop));
 
-    cout<<"Elapsed time(in ms) : "<< elapsed_time<<endl;  // 2.06  (faster than Odd-Even)
+    cout<<"Elapsed time(in ms) : "<< elapsed_time<<endl;  // 11.03
 
     for(int i = 0; i< 30 && i<N; i++) {
         cout<<"Bitonic sorting result at i:"<<i<<", is: "<<h_c[i]<<", original index: "<<h_cInd[i]<<", original array: "<<h_a[i]<<endl;
     }
 
     CHECK_CUDA(cudaFree(d_a));
+    CHECK_CUDA(cudaFree(d_c));
+    CHECK_CUDA(cudaFree(ts));
+    CHECK_CUDA(cudaFree(d_aInd));
+    CHECK_CUDA(cudaFree(d_cInd));
     CHECK_CUDA(cudaEventDestroy(start));
     CHECK_CUDA(cudaEventDestroy(stop));
 
