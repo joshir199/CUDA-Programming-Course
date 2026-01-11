@@ -7,9 +7,9 @@
 using namespace std;
 
 
-#define n 999
+#define n 50000
 #define threadsPerBlock 256
-#define threadCoarse 512
+#define threadCoarse 1024
 
 #define CHECK_CUDA(call) do {                    \
     cudaError_t e = (call);                      \
@@ -169,7 +169,7 @@ int main() {
     CHECK_CUDA(cudaEventCreate(&stop));
 
     int N = n;
-    float p = 0.85f;
+    float p = 0.95f;
     float h_a[N], h_c[N], totalSum;
     float *d_a, *d_c, *ts;
     int h_aInd[N], h_cInd[N], seed;
@@ -183,7 +183,7 @@ int main() {
 
     // fill data in host device
     for(int i=0; i<N ;i++) {
-        h_a[i] = (rand() % 29) * 0.01f;
+        h_a[i] = (rand() % 939) * 0.01f;
         h_aInd[i] = i;
     }
     totalSum = 0.0f;
@@ -304,7 +304,7 @@ int main() {
     float elapsed_time;
     CHECK_CUDA(cudaEventElapsedTime(&elapsed_time, start, stop));
 
-    cout<<"Elapsed time(in ms) : "<< elapsed_time<<endl;  // 11.03
+    cout<<"Elapsed time(in ms) : "<< elapsed_time<<endl;  // 65.03
 
     for(int i = 0; i< 30 && i<N; i++) {
         cout<<"Bitonic sorting result at i:"<<i<<", is: "<<h_c[i]<<", original index: "<<h_cInd[i]<<", original array: "<<h_a[i]<<endl;
