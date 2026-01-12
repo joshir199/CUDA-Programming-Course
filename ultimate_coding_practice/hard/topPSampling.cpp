@@ -34,6 +34,28 @@ __global__ void getSamplingProbability(int seed, float* p) {
     }
 }
 
+__global__ void getNucleusSamplingIndex(float* a, float* p, float* totalSum, int* ind, int N) {
+
+    if(threadIdx.x ==0) {
+        int index = 0;
+        float nucleusSum = 0.0f;
+        float pp = *p;
+        while(index<N) {
+            float prob = a[index] / *totalSum;    // convert it into probabilities
+            a[index] = prob;
+            if(pp - prob <0) {
+                break;
+            } else {
+                pp -= prob;
+                nucleusSum += prob;
+                index++;
+            }
+        }
+        *totalSum = nucleusSum;
+        *ind = index;
+    }
+}
+
 __global__ void softmaxFunction(float* a, float maxVal, float* totalSum, int N) {
 
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
