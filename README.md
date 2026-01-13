@@ -11,7 +11,7 @@ The repository contains solved examples along with major concepts planned across
 </div>
 
 
-Key concepts about CUDA architecture:
+### Key concepts about CUDA architecture:
    
 <b>Streaming Multiprocessors (SMs)</b> : SMs are the core processing units in a GPU, each containing CUDA cores, registers, and shared memory. Example: An NVIDIA RTX 3080 has 68 SMs with 128 CUDA cores per SM.
   
@@ -27,13 +27,13 @@ ________________________________________________________________________________
      
 The whole course has been divided into multiple weeks, each covering important topics in details. 
 
-* For beginners, I recommend to start with book "CUDA by Example" mentioned below and practice the coding questions along.
-* For intermediate and above, start with coding practices and learn important concepts from book "Programming Massively Parallel Processors" and lecture videos mentioned in reference section.
-* Concepts & Notes for each week are added within each week's folder
+* For beginners, I would recommend to start with book "CUDA by Example" mentioned below and practice the coding questions along.
+* For intermediate and above, start with coding practices for weekly topics and learn important concepts from the book "Programming Massively Parallel Processors". For in-depth analysis, watch lecture videos mentioned in the reference section below.
+* Concepts & Notes for each week are available within each week's folder (...in progress)
 
-### Prerequisites
+### Pre-requisites
 * Hardware: Ensure you have access to an NVIDIA GPU
-* Software: Install the CUDA Toolkit and a compatible NVIDIA driver. Use an IDE like for C/C++ coding.
+* Software: Install the CUDA Toolkit and a compatible NVIDIA driver. Use an IDE such as Visual Studio, PyCharm or others, for C/C++ coding.
 
 
 
